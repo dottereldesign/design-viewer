@@ -1,0 +1,44 @@
+{
+  "name": "design-viewer",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc -b && vite build",
+    "desktop": "node scripts/desktop.mjs dev",
+    "package": "node scripts/desktop.mjs build",
+    "prepare:downloader": "node scripts/prepare-downloader.mjs",
+    "prepare:media": "node scripts/prepare-media.mjs",
+    "test": "tsx --test src/model.test.ts src/zoom.test.ts src/videoQueue.test.ts",
+    "test:preview": "node scripts/check-grid-return.mjs wide-preview",
+    "test:grid": "node scripts/check-grid-return.mjs",
+    "test:video": "node scripts/check-grid-return.mjs video-download",
+    "test:boards": "node scripts/check-grid-return.mjs link-boards",
+    "test:categories": "node scripts/check-grid-return.mjs categories",
+    "test:drag": "node scripts/check-grid-return.mjs pointer-moves",
+    "test:workflow": "node scripts/check-grid-return.mjs workflow-tools",
+    "test:actions": "node scripts/check-grid-return.mjs copy-resources",
+    "test:native": "node scripts/desktop.mjs test"
+  },
+  "dependencies": {
+    "@tanstack/react-virtual": "^3.13.12",
+    "@tauri-apps/api": "^2.8.0",
+    "@tauri-apps/plugin-dialog": "^2.4.0",
+    "@tauri-apps/plugin-opener": "^2.5.0",
+    "lucide-react": "^0.468.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.8.0",
+    "@types/node": "20.19.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.7.0",
+    "ffmpeg-static": "^5.2.0",
+    "tsx": "4.20.0",
+    "typescript": "~5.8.3",
+    "vite": "^6.3.5"
+  }
+}

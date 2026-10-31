@@ -1,0 +1,56 @@
+<!doctype html><html><head><meta charset="UTF-8"><title>Video queue checks</title></head><body><div id="root"></div><pre id="check-result" hidden>pending</pre><script type="module">
+import React from 'react';import {createRoot} from 'react-dom/client';import App from '/src/App.tsx';import '/src/style.css';
+const poster='data:image/svg+xml,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300"><rect width="400" height="300" fill="tan"/></svg>');
+const library={items:[],projects:[{id:7,name:'Website',count:0}],tags:[{id:1,name:'Sports',count:0}],sources:['Design','Videos'],root:'C:/mock',scanning:false};
+const url='https://www.facebook.com/watch/?ref=saved&v=1459999332693030';
+const calls=[],started=[];let callbackId=0,current=null,live=0,maxLive=0;
+window.isTauri=true;window.__TAURI_INTERNALS__={transformCallback:()=>++callbackId,convertFileSrc:()=>poster,invoke:async(command,args)=>{
+ calls.push({command,args});if(command==='get_library')return structuredClone(library);if(command.startsWith('plugin:event|'))return ++callbackId;
+ if(command==='read_clipboard')return {files:[],url};if(command==='get_media')return 'video-poster.png';
+ if(command==='download_video')return new Promise((resolve,reject)=>{live++;maxLive=Math.max(maxLive,live);current={args,resolve,reject};started.push(args.input.url);});
+ if(command==='cancel_video_download'){const job=current;current=null;live--;job.reject('Download cancelled.');return;}
+ throw Error(`Unexpected ${command}`);
+}};window.__TAURI_EVENT_PLUGIN_INTERNALS__={unregisterListener(){}};
+createRoot(document.getElementById('root')).render(React.createElement(React.StrictMode,null,React.createElement(App)));
+const pause=ms=>new Promise(r=>setTimeout(r,ms));const assert=(value,label)=>{if(!value)throw Error(label);};
+async function until(test,label){const start=performance.now();while(!test()){if(performance.now()-start>5000)throw Error(`Timed out: ${label}`);await pause(20);}}
+const nav=name=>[...document.querySelectorAll('nav[aria-label=Library] button')].find(b=>b.querySelector('span')?.textContent===name).click();
+function setInput(element,value){Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(element,value);element.dispatchEvent(new Event('input',{bubbles:true}));}
+const row=url=>[...document.querySelectorAll('.download-queue-item')].find(row=>row.querySelector('span[title]')?.title===url);
+async function quick(text){const input=document.querySelector('[aria-label="Queue video links"]');setInput(input,text);await pause(40);input.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));await pause(40);}
+function finish(error){const job=current;current=null;live--;if(error){job.reject(error);return;}const id=library.items.length+1;library.items.push({id,path:`C:/mock/Videos/Downloads/${id}.mp4`,kind:'video',name:`Downloaded clip ${id}`,source:'Videos/Downloads',source_url:job.args.input.url,added:id,modified:1,missing:false,tags:job.args.input.tags,projects:job.args.input.projects,favourites:[]});job.resolve({id,reused:false});}
+const checks=[];
+try{
+ await until(()=>document.querySelector('nav[aria-label=Library]'),'navigation');await pause(80);nav('Facebook Videos');await pause(80);
+ document.querySelector('.content').tabIndex=-1;document.querySelector('.content').focus();document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'v',ctrlKey:true,bubbles:true,cancelable:true}));
+ await until(()=>document.querySelector('.video-download-modal textarea')?.value===url,'pasted video link');
+ for(const name of ['Website','Sports']){[...document.querySelectorAll('.capture-assign button')].find(b=>b.textContent.trim()===name).click();await until(()=>[...document.querySelectorAll('.capture-assign .chosen')].some(b=>b.textContent.trim()===name),'optional assignment');}
+ window.__awaitNativeEnter=true;await until(()=>current&&!document.querySelector('.video-download-modal'),'Enter queues in background');
+ assert(current.args.input.projects[0]===7&&current.args.input.tags[0]===1,'Assignments lost');
+ current.args.onProgress.onmessage({phase:'downloading',percent:40,downloaded:4000000,total:10000000,speed:1000000,eta:6});
+ await until(()=>document.querySelector('progress')?.value===40,'progress');assert(document.querySelector('.video-download-progress').textContent.includes('6s remaining'),'No ETA');
+ checks.push('Paste + Enter queues a video, closes the modal, and retains project/tag assignments and progress');
+ await quick('https://example.com/two\nhttps://example.com/three\nhttps://example.com/four');
+ await until(()=>document.querySelectorAll('.download-queue-item.queued').length===3,'waiting batch');assert(started.length===1,'More than one download started');
+ assert(document.activeElement===document.querySelector('[aria-label="Queue video links"]')&&document.activeElement.value==='','Quick entry should stay focused and clear');
+ await quick('https://www.facebook.com/watch/?v=1459999332693030&ref=other');assert(document.querySelectorAll('.download-queue-item').length===4,'Active duplicate added');
+ const stored=JSON.parse(localStorage.getItem('video-download-queue-v1'));assert(stored.filter(job=>job.status==='queued').length===3&&stored.find(job=>job.status==='active').projects[0]===7,'Queue persistence');
+ row('https://example.com/four').querySelector('[aria-label="Remove queued video"]').click();await until(()=>row('https://example.com/four').classList.contains('cancelled'),'remove waiting');assert(!calls.some(call=>call.command==='cancel_video_download'),'Removing waiting item cancelled active');
+ await quick('https://example.com/good\nnot a URL');assert(document.querySelector('.download-queue .form-error'),'Invalid batch was accepted');assert(document.querySelectorAll('.download-queue-item').length===4,'Invalid batch partly queued');
+ checks.push('Batch paste waits in FIFO order, active duplicates are skipped, waiting items can be removed, and invalid batches add nothing');
+ nav('Links');await pause(50);finish();await until(()=>current?.args.input.url==='https://example.com/two','second starts');
+ assert(document.querySelector('h1').textContent==='Links','Completion changed the view');assert(library.items[0].projects[0]===7&&library.items[0].tags[0]===1,'Saved metadata');
+ finish('Private video');await until(()=>current?.args.input.url==='https://example.com/three','failure advances');
+ await until(()=>row('https://example.com/two')?.classList.contains('error'),'failed row');row('https://example.com/two').querySelector('[aria-label="Retry video"]').click();await until(()=>row('https://example.com/two').classList.contains('queued'),'retry queued');
+ row('https://example.com/three').querySelector('[aria-label="Cancel download"]').click();await until(()=>current?.args.input.url==='https://example.com/two','cancel advances to retry');finish();
+ await until(()=>row('https://example.com/two')?.classList.contains('done'),'retry saved');assert(maxLive===1,'Overlapping downloads');
+ assert(started.join('|')==='https://www.facebook.com/watch/?v=1459999332693030|https://example.com/two|https://example.com/three|https://example.com/two','Incorrect execution order');
+ checks.push('Browsing remains available; finishing does not move your view; failures and cancellation advance automatically; retries return to the queue');
+ row('https://example.com/three').querySelector('[aria-label="Retry video"]').click();await until(()=>current?.args.input.url==='https://example.com/three','retry cancelled');
+ [...document.querySelectorAll('.download-queue footer button')].find(b=>b.textContent==='Clear finished').click();await until(()=>document.querySelectorAll('.download-queue-item').length===1,'clear history');assert(row('https://example.com/three').classList.contains('active'),'Clear finished removed active work');
+ document.querySelector('[aria-label="Hide downloads"]').click();await pause(40);assert(!document.querySelector('.download-queue'),'Panel did not hide');finish();await until(()=>library.items.length===3,'hidden completion');await pause(100);assert(!document.querySelector('.download-queue'),'Completion reopened hidden panel');assert(document.querySelector('h1').textContent==='Links','Hidden completion navigated');
+ nav('Facebook Videos');await until(()=>document.querySelectorAll('.card').length===3,'saved grid');document.querySelector('.card .card-open').click();await until(()=>document.querySelector('.viewer video'),'viewer');
+ checks.push('Queue can be hidden while downloads continue; clearing history preserves active work; completed videos retain their grid and viewer');
+ document.getElementById('check-result').textContent=JSON.stringify({ok:true,checks,maxConcurrentDownloads:maxLive,width:innerWidth});
+}catch(error){document.getElementById('check-result').textContent=JSON.stringify({ok:false,checks,error:String(error),started,calls:calls.slice(-8).map(c=>c.command)});}
+</script></body></html>

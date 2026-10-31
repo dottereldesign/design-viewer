@@ -1,0 +1,153 @@
+<!doctype html><html><head><meta charset="UTF-8"><title>Link collection checks</title></head><body><div id="root"></div><pre id="check-result" hidden>pending</pre><script type="module">
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import App from '/src/App.tsx';
+import '/src/style.css';
+const image='data:image/svg+xml,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300"><rect width="400" height="300" fill="tan"/></svg>');
+const library={items:[],projects:[{id:7,name:'Website',count:0}],tags:[{id:1,name:'Sports',count:0}],sources:['Design'],root:'C:/mock',scanning:false};
+const history=[];const calls=[],removedIds=new Set();let clipboard={files:[],url:''},callbackId=0,screenResult={path:'C:/staging/screen.png',name:'Screenshot.png'};
+window.isTauri=true;
+window.__TAURI_INTERNALS__={transformCallback:()=>++callbackId,convertFileSrc:()=>image,invoke:async(command,args)=>{
+  calls.push({command,args});
+  if(command==='get_library')return {...structuredClone(library),items:structuredClone(library.items.filter(i=>!removedIds.has(i.id))),undo_label:history.length?'Remove from library':null};
+  if(command==='update'){if(args.change.action==='undo_organisation'){removedIds.clear();for(const id of history.pop())removedIds.add(id);return;}if(args.change.action==='remove_items')history.push([...removedIds]);for(const id of args.change.ids??[]){if(args.change.action==='remove_items')removedIds.add(id);else if(args.change.action==='restore_items')removedIds.delete(id);}return;}
+  if(command.startsWith('plugin:event|'))return ++callbackId;
+  if(command==='read_clipboard'){await new Promise(r=>setTimeout(r,40));return structuredClone(clipboard);}
+  if(command==='capture_screen')return screenResult;
+  if(command==='crop_thumbnail')return {path:'C:/staging/cropped.png',name:'Thumbnail.png'};
+  if(command==='replace_thumbnail'){library.items.find(i=>i.id===args.id).thumbnail=args.file.path;return;}
+  if(command==='discard_capture'||command==='open_external_url')return;
+  if(command==='capture_items'){
+    const c=args.input,id=library.items.length+1;
+    library.items.push({id,path:c.url,name:c.name||'Reference',kind:'link',source:({fonts:'Fonts',codepen:'CodePen','brand-guidelines':'Brand Guidelines'})[c.destination],thumbnail:'C:/saved/thumb.png',modified:0,added:id,missing:false,tags:c.tags,projects:c.projects});
+    return {ids:[id],added:1,reused:0,destination:c.destination};
+  }
+  throw Error(`Unexpected ${command}`);
+}};
+window.__TAURI_EVENT_PLUGIN_INTERNALS__={unregisterListener(){}};
+createRoot(document.getElementById('root')).render(React.createElement(React.StrictMode,null,React.createElement(App)));
+const pause=ms=>new Promise(r=>setTimeout(r,ms));
+const assert=(ok,label)=>{if(!ok)throw Error(label);};
+async function until(test,label){let start=performance.now();while(!test()){if(performance.now()-start>5000)throw Error(`Timed out: ${label}`);await pause(20);}}
+const nav=name=>[...document.querySelectorAll('nav[aria-label=Library] button')].find(b=>b.querySelector('span')?.textContent===name).click();
+const paste=()=>document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'v',ctrlKey:true,bubbles:true,cancelable:true}));
+const checks=[];
+try{
+  await until(()=>document.querySelector('nav[aria-label=Library]'),'navigation');await pause(100);
+  const names=[...document.querySelectorAll('nav[aria-label=Library] button span')].map(e=>e.textContent);
+  assert(names.slice(names.indexOf('Resources')+1).join('|')==='Fonts|CodePen|Brand Guidelines|Facebook Videos|Photography','Sidebar order');
+  for (const name of ['fonts','codepen','facebook','brand-guidelines','resources']) {
+    const icon=document.querySelector(`[data-sidebar-icon="${name}"]`);
+    assert(icon && icon.getBoundingClientRect().width===16 && icon.getAttribute('aria-hidden')==='true', `Missing or incorrectly sized ${name} icon`);
+  }
+  assert(document.querySelector('[data-sidebar-icon="facebook"] circle').getAttribute('fill')==='#0866FF','Facebook brand colour');
+  checks.push('Distinct local icons render for CodePen, Facebook Videos, Brand Guidelines and Resources');
+  for(const name of ['Fonts','CodePen','Brand Guidelines']){
+    nav(name);await until(()=>document.querySelector(name==='Brand Guidelines'?'.brand-guidelines-table':name==='Fonts'?'.fonts-table':'.link-board'),'collection');
+    assert(!document.querySelector('.link-card'),'Collection must begin empty');
+  }
+  checks.push('Both empty collections appear immediately below Resources');
+  nav('CodePen');await pause(50);
+  clipboard={files:[],url:'https://codepen.io/example/pen/abc'};
+  document.querySelector('.link-board').tabIndex=-1;document.querySelector('.link-board').focus();paste();
+  await until(()=>document.querySelector('.capture-modal input[type=url]')?.value===clipboard.url,'URL paste');
+  clipboard={files:[{path:'C:/staging/codepen.png',name:'Clipboard.png'}],url:''};paste();
+  await until(()=>document.querySelector('.thumbnail-capture img'),'Thumbnail paste');
+  assert(document.querySelector('.capture-modal input[type=url]').value.includes('codepen.io'),'Image paste overwrote URL');
+  for(const name of ['Website','Sports']){
+    [...document.querySelectorAll('.capture-assign button')].find(b=>b.textContent.trim()===name).click();
+    await until(()=>[...document.querySelectorAll('.capture-assign .chosen')].some(b=>b.textContent.trim()===name),'assignment');
+  }
+  // The headless runner sends an actual Enter key through CDP to the focused URL input.
+  window.__awaitNativeEnter=true;
+  await until(()=>document.querySelector('.link-card'),'Enter saves');
+  assert(!document.querySelector('.capture-modal'),'Capture stayed open');
+  const saved=calls.find(c=>c.command==='capture_items').args.input;
+  assert(saved.destination==='codepen'&&saved.thumbnail.path==='C:/staging/codepen.png'&&saved.projects[0]===7&&saved.tags[0]===1,'Capture metadata');
+  checks.push('URL then image then Enter saves a thumbnail with optional project and tag');
+  document.querySelector('.link-card-open').click();await pause(50);
+  assert(calls.some(c=>c.command==='open_external_url'&&c.args.url===saved.url),'Link should open external browser');
+  document.querySelector('.link-card-menu').click();await until(()=>document.querySelector('[role=menu]'),'card menu');
+  assert([...document.querySelectorAll('[role=menuitem]')].some(b=>b.textContent.includes('Tags')),'Tags action missing');
+  document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
+  nav('Links');await pause(100);assert(!document.querySelector('.link-card'),'Board leaked into Links');
+  [...document.querySelectorAll('.sidebar button')].find(b=>b.querySelector('span')?.textContent==='Website').click();
+  await until(()=>document.querySelector('.link-card img'),'Project thumbnail');
+  checks.push('Thumbnail cards open websites and remain visible inside assigned projects');
+  nav('Brand Guidelines');await pause(50);document.querySelector('.brand-guidelines-table .empty-state button').click();
+  await until(()=>document.querySelector('.capture-modal'),'brand capture');
+  clipboard={files:[],url:'https://brand.example/guidelines'};paste();
+  // Enter during clipboard reading must still save a URL-only guideline.
+  document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));
+  await until(()=>document.querySelector('.brand-guidelines-table tbody tr')&&!document.querySelector('.capture-modal'),'brand saved');
+  assert(document.querySelectorAll('.brand-guidelines-table tbody tr').length===1&&library.items[1].source==='Brand Guidelines'&&!document.querySelector('.link-card'),'Brand Guidelines must use only the table');
+  assert(!calls.filter(c=>c.command==='capture_items').at(-1).args.input.thumbnail,'Brand Guidelines must save without a thumbnail');
+  assert(!document.querySelector('[aria-label="Thumbnail size"]'),'Table must not show thumbnail controls');
+  checks.push('Brand Guidelines saves URL-only references into the same table as Links, without requiring thumbnails');
+  document.querySelector('.brand-guidelines-table .link-name').focus();
+  document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'a',ctrlKey:true,bubbles:true,cancelable:true}));
+  await until(()=>document.querySelectorAll('.brand-guidelines-table tr.selected').length===1,'Collection selection');
+  checks.push('Ctrl+A selects references in the active collection');
+  document.querySelector('.brand-guidelines-table .popover summary').click();
+  await pause(30);[...document.querySelectorAll('.brand-guidelines-table .popover-panel button')].find(b=>b.textContent.includes('Remove from library')).click();
+  await until(()=>!document.querySelector('.brand-guidelines-table tbody tr'),'Remove guideline');
+  await until(()=>[...document.querySelectorAll('.toast button')].some(b=>b.textContent==='Undo'),'Undo available');
+  [...document.querySelectorAll('.toast button')].find(b=>b.textContent==='Undo').click();
+  await until(()=>document.querySelector('.brand-guidelines-table tbody tr'),'Undo restores guideline');
+  assert(library.items[1].source==='Brand Guidelines','Undo changed collection');
+  checks.push('Table row removal and Undo preserve the Brand Guidelines collection');
+  const search=document.querySelector('input[placeholder="Search"]')??document.querySelector('input[aria-label="Search library"]');
+  const setSearch=value=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(search,value);search.dispatchEvent(new Event('input',{bubbles:true}));};
+  setSearch('no-matching-guideline');await until(()=>!document.querySelector('.brand-guidelines-table tbody tr'),'Guideline search');
+  setSearch('');await until(()=>document.querySelector('.brand-guidelines-table tbody tr'),'Clear guideline search');
+  document.querySelector('.brand-guidelines-table .link-name').click();await pause(30);
+  assert(calls.some(c=>c.command==='open_external_url'&&c.args.url==='https://brand.example/guidelines'),'Guideline row should open the saved URL');
+  checks.push('Brand Guidelines table supports search and opens each original URL');
+  nav('Fonts');await pause(50);document.querySelector('.fonts-table .empty-state button').click();
+  await until(()=>document.querySelector('.capture-modal'),'fonts capture');
+  assert(document.querySelector('.capture-modal h2').textContent==='Fonts'&&document.querySelector('[aria-label="Save link to"]').value==='fonts','Fonts capture destination/title');
+  clipboard={files:[],url:'https://fonts.example/typeface'};paste();
+  await until(()=>document.querySelector('.capture-modal input[type=url]')?.value===clipboard.url,'font URL');
+  assert(!document.querySelector('.thumbnail-capture'),'Fonts should not show thumbnail capture controls');
+  for(const name of ['Website','Sports']){
+    [...document.querySelectorAll('.capture-assign button')].find(b=>b.textContent.trim()===name).click();
+    await until(()=>[...document.querySelectorAll('.capture-assign .chosen')].some(b=>b.textContent.trim()===name),'font assignment');
+  }
+  document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));
+  await until(()=>document.querySelector('.fonts-table tr[data-item-id="3"]')&&!document.querySelector('.capture-modal'),'font saved');
+  assert(!calls.filter(c=>c.command==='capture_items').at(-1).args.input.thumbnail,'Fonts must save without a thumbnail');
+  assert(!document.querySelector('.link-card')&&!document.querySelector('[aria-label="Thumbnail size"]'),'Fonts should show links only');
+  const font=library.items.find(item=>item.source==='Fonts');assert(font?.projects[0]===7&&font?.tags[0]===1,'Font assignments lost');
+  assert(document.querySelector('h1').textContent==='Fonts','Fonts did not remain selected');
+  nav('Links');await pause(80);assert(!document.querySelector('[data-item-id="3"]'),'Font leaked into Links');
+  [...document.querySelectorAll('.sidebar button')].find(b=>b.querySelector('span')?.textContent==='Website').click();
+  await until(()=>document.querySelector('.links-table tr[data-item-id="3"]'),'Font project link');
+  checks.push('Fonts uses a Name/Link table, saves URL-only references with projects/tags, hides thumbnail controls and stays a table inside projects');
+  nav('CodePen');await pause(80);
+  // Once the screen overlay returns a confirmed selection, no further form submit is needed.
+  clipboard={files:[],url:'https://codepen.io/example/pen/captured'};
+  document.querySelector('.link-board').focus();paste();
+  await until(()=>document.querySelector('.capture-modal input[type=url]')?.value===clipboard.url,'capture URL');
+  assert(Number(document.querySelector('[aria-label="Thumbnail aspect ratio"]').value)===4/3,'Capture must default to 4:3');
+  const button=text=>[...document.querySelectorAll('button')].find(b=>b.textContent.trim()===text);
+  screenResult=null;button('Capture & save').click();await pause(80);
+  assert(document.querySelector('.capture-modal')&&calls.filter(c=>c.command==='capture_items').length===3,'Cancel should retain draft without saving');
+  const select=document.querySelector('[aria-label="Thumbnail aspect ratio"]');select.value=String(16/9);select.dispatchEvent(new Event('change',{bubbles:true}));await pause(30);
+  screenResult={path:'C:/staging/screen.png',name:'Screenshot.png'};button('Capture & save').click();
+  await until(()=>!document.querySelector('.capture-modal')&&library.items.length===4,'capture automatically saves');
+  assert(calls.filter(c=>c.command==='capture_screen').at(-1).args.ratio===16/9,'Selected ratio lost');
+  assert(calls.filter(c=>c.command==='capture_items').at(-1).args.input.thumbnail.path===screenResult.path,'Captured thumbnail lost');
+  checks.push('Capture defaults to 4:3, supports ratio changes, saves immediately, and cancellation retains the unsaved draft');
+  document.querySelector('.link-card[data-item-id="4"] .link-card-menu').click();
+  await until(()=>button('Edit thumbnail'),'thumbnail action');button('Edit thumbnail').click();
+  await until(()=>document.querySelector('.thumbnail-crop-box'),'thumbnail crop');
+  const zoom=document.querySelector('[aria-label="Thumbnail zoom"]');zoom.value='2';zoom.dispatchEvent(new Event('input',{bubbles:true}));
+  button('Whole image').click();await pause(30);button('Save thumbnail').click();
+  await until(()=>!document.querySelector('.thumbnail-editor'),'thumbnail saved');
+  const crop=calls.filter(c=>c.command==='crop_thumbnail').at(-1).args;
+  assert(crop.width===400&&crop.height===300&&crop.x===0&&crop.y===0,'Whole image should not crop');
+  assert(library.items[3].path==='https://codepen.io/example/pen/captured'&&library.items[3].thumbnail==='C:/staging/cropped.png','Editing thumbnail changed URL or failed to persist');
+  checks.push('Edit thumbnail opens the crop directly; whole-image save replaces only the thumbnail');
+  document.getElementById('check-result').textContent=JSON.stringify({ok:true,checks,width:innerWidth});
+}catch(error){document.getElementById('check-result').textContent=JSON.stringify({ok:false,checks,error:String(error),calls:calls.slice(-6)});}
+</script></body></html>

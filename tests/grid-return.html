@@ -1,0 +1,103 @@
+<!doctype html><html><head><meta charset="UTF-8"><title>Grid return automated check</title></head><body><div id="root"></div><pre id="check-result" hidden>pending</pre><script type="module">
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import App from '/src/App.tsx';
+import '/src/style.css';
+
+const image = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600"><rect width="800" height="600" fill="#dce5d3"/></svg>');
+const library = {
+  items: Array.from({ length: 420 }, (_, n) => ({ id: n + 1, name: `Reference ${String(n + 1).padStart(4, '0')}`, path: `C:/mock/${n + 1}.png`, kind: 'image', source: 'Design', modified: 1, added: n + 1, missing: false, tags: [1], projects: [7], favourites: [] })),
+  projects: [{ id: 7, name: 'Example project', count: 420 }], tags: [{ id: 1, name: 'School', count: 420 }], sources: ['Design', 'Photography', 'Videos'], root: 'C:/mock', scanning: false,
+};
+let callbackId = 0;
+window.isTauri = true;
+window.__TAURI_INTERNALS__ = {
+  transformCallback: () => ++callbackId,
+  convertFileSrc: () => image,
+  invoke: async (command) => {
+    if (command === 'get_library') return library;
+    if (command === 'get_media') return 'mock.png';
+    if (command.startsWith('plugin:event|')) return ++callbackId;
+    throw Error(`Unexpected command: ${command}`);
+  },
+};
+window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener() {} };
+createRoot(document.getElementById('root')).render(React.createElement(React.StrictMode, null, React.createElement(App)));
+const pause = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+async function until(test, label) {
+  const start = performance.now();
+  while (!test()) { if (performance.now() - start > 4000) throw Error(`Timed out: ${label}`); await pause(16); }
+}
+function assert(value, label) { if (!value) throw Error(label); }
+const viewer = () => document.querySelector('.viewer');
+function key(value) { document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: value, bubbles: true })); }
+async function advance(count, direction = 'ArrowRight') {
+  await pause(100);
+  for (let n = 0; n < count; n++) {
+    const before = viewer()?.dataset.itemId;
+    key(direction);
+    await until(() => viewer()?.dataset.itemId !== before, 'advance viewer');
+  }
+}
+async function returned(id, close = 'Escape') {
+  if (close === 'Escape') key('Escape');
+  else document.querySelector('.viewer [aria-label="Close viewer"]').click();
+  await until(() => !viewer() && document.activeElement?.closest('.card')?.dataset.itemId === String(id), `focus item ${id}`);
+  const card = document.activeElement.closest('.card');
+  const rect = card.getBoundingClientRect(), area = document.querySelector('.content').getBoundingClientRect();
+  assert(rect.top >= area.top - 1 && rect.bottom <= area.bottom + 1, `Returned item ${id} is not fully visible`);
+  assert(card.classList.contains('returned'), `Returned item ${id} is not highlighted`);
+  return document.querySelector('.content').scrollTop;
+}
+const checks = [];
+const errors = [];
+window.addEventListener('error', (event) => errors.push(event.message));
+try {
+  await until(() => document.querySelector('.card-open'), 'library render');
+  await pause(100);
+  document.querySelector('.card-open').click();
+  await until(() => viewer(), 'viewer opens');
+  await advance(200);
+  assert(viewer().dataset.itemId === '220', 'Wrong item after 200 advances');
+  const distantScroll = await returned(220);
+  assert(distantScroll > 2000, 'Grid did not leave its original scroll position');
+  checks.push('Escape after 200 images returns to the visible, focused and highlighted thumbnail');
+
+  window.__awaitNativeEnter = true;
+  await until(() => viewer()?.dataset.itemId === '220', 'focused thumbnail reopens');
+  window.__awaitNativeEnter = false;
+  await returned(220, 'X');
+  checks.push('Enter reopens the focused thumbnail; X follows it on repeated close');
+  await pause(2100);
+  assert(!document.querySelector('.card.returned'), 'Temporary highlight did not clear');
+  checks.push('Highlight clears after two seconds');
+
+  const source = document.querySelector('[aria-label="Filter by category"]');
+  source.value = ''; source.dispatchEvent(new Event('change', { bubbles: true }));
+  const search = document.querySelector('[aria-label="Search library"]');
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(search, 'Reference');
+  search.dispatchEvent(new Event('input', { bubbles: true }));
+  const sort = document.querySelector('[aria-label="Sort items"]');
+  sort.value = 'name'; sort.dispatchEvent(new Event('change', { bubbles: true }));
+  await until(() => document.querySelector('.card')?.dataset.itemId === '1', 'name sort and filter');
+  document.querySelector('.card-open').click();
+  await until(() => viewer()?.dataset.itemId === '1', 'filtered viewer');
+  await advance(200);
+  await returned(201, 'X');
+  assert(source.value === '' && search.value === 'Reference' && sort.value === 'name', 'Filters or sorting changed');
+  checks.push('X after 200 images follows name order and preserves search, source and sort');
+
+  document.activeElement.click(); await until(() => viewer(), 'reopen for wrap');
+  await advance(220);
+  assert(viewer().dataset.itemId === '1', 'Viewer did not wrap to first image');
+  await returned(1);
+  document.activeElement.click(); await until(() => viewer(), 'reopen first');
+  await advance(1, 'ArrowLeft');
+  assert(viewer().dataset.itemId === '420', 'Viewer did not wrap to last image');
+  const endScroll = await returned(420);
+  checks.push('First and last rows remain visible after wrapping in either direction');
+  document.getElementById('check-result').textContent = JSON.stringify({ ok: true, checks, distantScroll, endScroll, width: innerWidth });
+} catch (error) {
+  document.getElementById('check-result').textContent = JSON.stringify({ ok: false, checks, error: String(error), viewer: viewer()?.dataset.itemId, focus: document.activeElement?.outerHTML.slice(0, 300), scroll: document.querySelector('.content')?.scrollTop, cards: [...document.querySelectorAll('.card')].map(el => el.dataset.itemId), errors });
+}
+</script></body></html>

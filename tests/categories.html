@@ -1,0 +1,62 @@
+<!doctype html><html><head><meta charset="UTF-8"><title>Category interaction checks</title></head><body><div id="root"></div><pre id="check-result" hidden>pending</pre><script type="module">
+import React from 'react';import {createRoot} from 'react-dom/client';import App from '/src/App.tsx';import '/src/style.css';
+const image='data:image/svg+xml,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300"><rect width="400" height="300" fill="tan"/></svg>');
+const item=(id,name,source,kind='image')=>({id,name,source,kind,path:`C:/${source}/${name}.png`,modified:1,added:id,missing:false,tags:[1],projects:[7],favourites:[7]});
+const library={items:[item(1,'Logo','Design/3d'),item(2,'Scene','Design/3d'),item(3,'Brand','Design/branding'),{...item(4,'Photo','Photography'),category:'Photography'},item(5,'Movie','Videos','video')],categories:['3d','branding','Photography'],projects:[{id:7,name:'Website',count:5}],tags:[{id:1,name:'Keep',count:5}],sources:['Design','Design/3d','Design/branding','Photography','Videos'],root:'C:/Design',scanning:false};
+const history=[];const calls=[];let callback=0;window.isTauri=true;window.__TAURI_INTERNALS__={transformCallback:()=>++callback,convertFileSrc:()=>image,invoke:async(command,args)=>{
+ calls.push({command,args});if(command==='get_library')return {...structuredClone(library),undo_label:history.length?'Change category':null};if(command.startsWith('plugin:event|'))return ++callback;if(command==='get_media')return 'C:/mock.png';
+ if(command==='update'){const c=args.change;if(c.action==='undo_organisation'){library.items=history.pop();return;}if(c.action==='set_category'){history.push(structuredClone(library.items));for(const i of library.items.filter(i=>c.ids.includes(i.id)))i.category=c.value;if(c.value&&!library.categories.includes(c.value))library.categories.push(c.value);}else if(c.action==='restore_categories'){for(const [id,name]of JSON.parse(c.value))library.items.find(i=>i.id===id).category=name;}else if(c.action==='create_category')library.categories.push(c.name);else throw Error('Unexpected change '+c.action);return;}
+ throw Error('Unexpected '+command);
+}};window.__TAURI_EVENT_PLUGIN_INTERNALS__={unregisterListener(){}};
+createRoot(document.getElementById('root')).render(React.createElement(React.StrictMode,null,React.createElement(App)));
+const pause=ms=>new Promise(r=>setTimeout(r,ms));const assert=(ok,label)=>{if(!ok)throw Error(label);};
+async function until(test,label){const start=performance.now();while(!test()){if(performance.now()-start>7000)throw Error('Timed out: '+label);await pause(25);}}
+const category=name=>document.querySelector(`[data-category="${name}"]`);const cards=()=>[...document.querySelectorAll('.card')];
+const button=text=>[...document.querySelectorAll('button')].find(b=>b.textContent.trim()===text);
+const nav=name=>[...document.querySelectorAll('nav[aria-label=Library] button')].find(b=>b.querySelector('span')?.textContent===name).click();
+const choose=name=>[...document.querySelectorAll('.category-choices button')].find(b=>b.textContent.trim().toLowerCase()===name.toLowerCase()).click();
+const checks=[];
+try{
+ await until(()=>category('3d')&&cards().length===5,'initial media');
+ assert(category('Photography')&&!document.querySelector('nav[aria-label=Categories]').textContent.includes('Videos'),'Photography category missing or Videos leaked into categories');
+ assert(![...document.querySelectorAll('nav[aria-label=Library] button span')].some(s=>s.textContent==='Photography'),'Photography still in main navigation');
+ checks.push('Categories replace Sources; Photography lives in Categories; Facebook Videos stays in main navigation');
+ category('3d').click();await until(()=>cards().length===2,'3d category');
+ for(const id of [1,2]){document.querySelector(`[data-item-id="${id}"] .card-select`).click();await pause(30);}
+ assert(document.querySelector('.selection-bar').textContent.includes('2 selected'),'Multi-selection failed');
+ const data=new DataTransfer();let nativeGhost;const setDragImage=data.setDragImage.bind(data);data.setDragImage=(element,x,y)=>{nativeGhost=element;setDragImage(element,x,y);};document.querySelector('[data-item-id="1"]').dispatchEvent(new DragEvent('dragstart',{bubbles:true,cancelable:true,dataTransfer:data}));
+ assert(JSON.stringify(JSON.parse(data.getData('application/design-items')))==='[1,2]','Drag lost the selected references');
+ await until(()=>document.querySelector('.item-drag-badge'),'Compact badge');
+ assert(nativeGhost?.tagName==='CANVAS'&&nativeGhost.width===1&&nativeGhost.height===1,'Native thumbnail ghost was not replaced');
+ assert(document.querySelector('.item-drag-badge b').textContent==='2','Badge lost selection count');
+ const destination=category('branding').getBoundingClientRect();category('branding').querySelector('span').dispatchEvent(new DragEvent('dragover',{bubbles:true,cancelable:true,dataTransfer:data,clientX:destination.left+40,clientY:destination.top+12}));await pause(30);
+ assert(category('branding').classList.contains('drop-target'),'Drop destination not highlighted');
+ assert(document.querySelector('.item-drag-badge').textContent==='2Move to Branding','Badge does not confirm destination');
+ assert(document.querySelector('.item-drag-badge').getBoundingClientRect().left>document.querySelector('.sidebar').getBoundingClientRect().right,'Badge covers sidebar destinations');
+ assert(getComputedStyle(document.querySelector('.item-drag-badge')).pointerEvents==='none','Badge intercepts drop');
+ category('branding').dispatchEvent(new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer:data}));
+ await until(()=>cards().length===0&&library.items[0].category==='branding','Bulk drag move');
+ assert(!document.querySelector('.item-drag-badge')&&!document.querySelector('.item-drag-native-ghost'),'Drag feedback not cleared after drop');
+ checks.push('Tiny native ghost and count badge stay outside the sidebar; destination name and row highlight confirm the drop; feedback clears on drop');
+ assert(library.items[0].path==='C:/Design/3d/Logo.png'&&library.items[0].projects[0]===7&&library.items[0].tags[0]===1,'Move lost files or curation');
+ button('Undo').click();await until(()=>cards().length===2,'Undo bulk move');
+ const cancelled=new DataTransfer();document.querySelector('[data-item-id="1"]').dispatchEvent(new DragEvent('dragstart',{bubbles:true,cancelable:true,dataTransfer:cancelled}));await until(()=>document.querySelector('.item-drag-badge'),'Cancelled drag begins');document.querySelector('[data-item-id="1"]').dispatchEvent(new DragEvent('dragend',{bubbles:true,dataTransfer:cancelled}));await until(()=>!document.querySelector('.item-drag-badge'),'Cancelled drag clears');
+ checks.push('Dragging one selected thumbnail moves the whole selection, highlights the category and supports Undo without changing files or curation');
+ document.querySelector('[data-item-id="1"]').dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:350,clientY:300}));
+ await until(()=>button('Change category…'),'Context action');button('Change category…').click();await until(()=>document.querySelector('.category-picker'),'Picker');choose('branding');
+ await until(()=>cards().length===1&&!document.querySelector('.category-picker'),'One-click picker move');button('Undo').click();await until(()=>cards().length===2,'Undo picker');
+ for(const id of [1,2]){document.querySelector(`[data-item-id="${id}"] .card-select`).click();await pause(30);}
+ button('Change category').click();await until(()=>document.querySelector('.category-picker'),'Bulk picker');
+ const input=document.querySelector('[aria-label="Find or create category"]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'Identity');input.dispatchEvent(new Event('input',{bubbles:true}));
+ await until(()=>button('Create “Identity” & move'),'Create and move');button('Create “Identity” & move').click();await until(()=>category('Identity')&&cards().length===0,'New category');
+ category('Identity').click();await until(()=>cards().length===2,'Open new category');
+ checks.push('Right-click and selection-bar pickers move immediately; typing a new name creates the category and moves the selection in one action');
+ document.querySelector('[data-item-id="1"] .card-select').click();await pause(30);document.querySelector('[data-item-id="1"] .card-open').focus();document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'c',bubbles:true,cancelable:true}));
+ await until(()=>document.querySelector('.category-picker'),'C shortcut');choose('Uncategorised');await until(()=>cards().length===1,'Uncategorised move');
+ button('Undo').click();await until(()=>cards().length===2,'Undo uncategorised');
+ category('Photography').click();await until(()=>cards().length===1&&document.querySelector('[data-item-id="4"]'),'Photography navigation');
+ nav('Facebook Videos');await until(()=>cards().length===1&&document.querySelector('[data-item-id="5"]'),'Facebook Videos navigation');
+ checks.push('C opens category changes; uncategorised moves can be undone; Photography and Facebook Videos show their original media');
+ document.getElementById('check-result').textContent=JSON.stringify({ok:true,checks,width:innerWidth});
+}catch(error){document.getElementById('check-result').textContent=JSON.stringify({ok:false,error:String(error),checks,calls:calls.slice(-6)});}
+</script></body></html>

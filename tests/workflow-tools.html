@@ -1,0 +1,73 @@
+<!doctype html><html><head><meta charset="UTF-8"><title>Workflow checks</title></head><body><div id="root"></div><pre id="check-result" hidden>pending</pre><script type="module">
+import React from 'react';import {createRoot} from 'react-dom/client';import App from '/src/App.tsx';import '/src/style.css';
+const image='data:image/svg+xml,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300"><rect width="400" height="300" fill="tan"/></svg>');
+const item=(id,name,projects=[],kind='image',source='Design/3d')=>({id,name,projects,kind,source,path:kind==='link'?'https://example.com/font':`C:/Design/${name}.png`,modified:1,added:id,missing:false,tags:[]});
+const library={items:[item(1,'Assigned',[7]),item(2,'New image'),item(3,'Font',[],'link','Fonts'),item(4,'Pen',[],'link','CodePen')],projects:[{id:7,name:'Website',count:1}],tags:[],sources:['Design/3d'],root:'C:/Design',scanning:false};
+let clipboard='image',captureFailure=false,clipboardReads=0;
+const redo=[],history=[],calls=[];let callback=0;window.isTauri=true;window.__TAURI_INTERNALS__={transformCallback:()=>++callback,convertFileSrc:()=>image,invoke:async(command,args)=>{
+ calls.push({command,args});if(command==='get_library')return {...structuredClone(library),undo_label:history.length?'Organisation change':null,redo_label:redo.length?'Organisation change':null};if(command.startsWith('plugin:event|'))return ++callback;if(command==='get_media')return 'C:/mock.png';if(command==='open_external_url')return;
+ if(command==='read_clipboard'){clipboardReads++;await new Promise(resolve=>setTimeout(resolve,70));return clipboard==='url'?{files:[],url:'https://example.com/pasted'}:{files:[{path:'C:/staged/paste.png',name:'Pasted image.png'}],url:''};}
+ if(command==='discard_capture')return;
+ if(command==='capture_items'){if(captureFailure)throw Error('Could not save pasted image');const input=args.input;let saved=library.items.find(i=>i.id===100);const reused=!!saved;if(!saved){saved={...item(100,'Pasted image'),source:input.source+'/Captures'};library.items.push(saved);}return {ids:[100],added:reused?0:1,reused:reused?1:0,destination:null};}
+
+ if(command==='update'){const c=args.change;if(c.action==='undo_organisation'){redo.push(structuredClone(library.items));library.items=history.pop();return;}if(c.action==='redo_organisation'){history.push(structuredClone(library.items));library.items=redo.pop();return;}if(c.action==='set_category'){history.push(structuredClone(library.items));redo.length=0;for(const i of library.items.filter(i=>c.ids.includes(i.id)))i.category=c.value;return;}if(c.action==='add_project'){redo.length=0;history.push(structuredClone(library.items));for(const i of library.items.filter(i=>c.ids.includes(i.id)))if(!i.projects.includes(c.target))i.projects.push(c.target);return;}throw Error(c.action);}throw Error(command);
+}};window.__TAURI_EVENT_PLUGIN_INTERNALS__={unregisterListener(){}};
+createRoot(document.getElementById('root')).render(React.createElement(React.StrictMode,null,React.createElement(App)));
+const pause=ms=>new Promise(r=>setTimeout(r,ms)),assert=(ok,label)=>{if(!ok)throw Error(label);};
+async function until(test,label){const start=performance.now();while(!test()){if(performance.now()-start>7000)throw Error('Timed out: '+label);await pause(25);}}
+const nav=name=>[...document.querySelectorAll('nav[aria-label=Library] button')].find(b=>b.querySelector('span')?.textContent===name).click();
+const key=(key,extra={})=>{const e=new KeyboardEvent('keydown',{key,bubbles:true,cancelable:true,...extra});document.activeElement.dispatchEvent(e);return e;};
+const checks=[];
+try{
+ await until(()=>document.querySelector('.card'),'library');
+ const navigation=[...document.querySelectorAll('nav[aria-label=Library] button span')].map(el=>el.textContent);assert(navigation[0]==='Links'&&!navigation.includes('All')&&!navigation.includes('Inbox'),'Sidebar should start with Links without All or Inbox');
+ checks.push('Sidebar starts with Links; categories and projects remain available');
+ const card=document.querySelector('[data-item-id="2"]');card.querySelector('.card-open').focus();key(' ');await until(()=>document.querySelector('.quick-preview img'),'Space preview');assert(!document.querySelector('.viewer'),'Opened full viewer');assert(document.querySelector('main').inert,'Background must be inert');
+ key('ArrowLeft');await until(()=>document.querySelector('.quick-preview>header strong')?.textContent==='Assigned','Arrow browse');assert(!calls.some(c=>c.command==='open_external_url'),'Preview opened website');
+ key(' ');await until(()=>!document.querySelector('.quick-preview'),'Space closes');assert(!document.querySelector('.viewer'),'Space opened viewer on close');
+ document.querySelector('[data-item-id="2"] .card-open').focus();key(' ');await until(()=>document.querySelector('.quick-preview'),'reopen');key('Escape');await until(()=>!document.querySelector('.quick-preview'),'Esc closes');
+ checks.push('Space peeks without full viewer; arrows browse links without launching them; Space/Esc restore library');
+ nav('Fonts');await until(()=>document.querySelector('.fonts-table .link-name'),'Fonts table');document.querySelector('.fonts-table .link-name').focus();key(' ');await until(()=>document.querySelector('.quick-preview-link'),'Link preview');assert(!calls.some(c=>c.command==='open_external_url'),'Link preview launched website');key('Escape');await until(()=>!document.querySelector('.quick-preview'),'Close link preview');document.querySelector('nav[aria-label=Categories] button').click();await until(()=>document.querySelector('[data-item-id="2"]'),'Category overview');
+ const search=document.querySelector('input[type=search]')||document.querySelector('input[placeholder="Search"]');search.focus();assert(!key(' ').defaultPrevented,'Space intercepted while typing');assert(!key('z',{ctrlKey:true}).defaultPrevented,'Text Undo intercepted');assert(!key('Z',{ctrlKey:true,shiftKey:true}).defaultPrevented,'Text Redo intercepted');assert(!key('y',{ctrlKey:true}).defaultPrevented,'Text Ctrl+Y intercepted');
+ document.querySelector('[data-item-id="2"] .card-select').click();await pause(30);
+ const data=new DataTransfer();document.querySelector('[data-item-id="2"]').dispatchEvent(new DragEvent('dragstart',{bubbles:true,cancelable:true,dataTransfer:data}));
+ const project=[...document.querySelectorAll('.project-row')].find(e=>e.textContent.includes('Website'));
+ assert(project,'Project drop target missing');project.dispatchEvent(new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer:data}));
+ await until(()=>library.items.find(i=>i.id===2).projects.includes(7),'Project assignment');
+ await pause(9500);assert(!document.querySelector('.toast'),'Toast did not expire');
+ document.querySelector('nav[aria-label=Library] button').focus();key('z',{ctrlKey:true});await until(()=>!library.items.find(i=>i.id===2).projects.length,'Undo after toast');
+ assert(library.items.find(i=>i.id===2).path==='C:/Design/New image.png','Undo changed file path');
+ assert(document.querySelector('[aria-label="Undo organisation change"]').disabled,'Undo remains enabled with empty history');
+ checks.push('Project drag assigns references; Ctrl+Z restores assignments after toast expires; text inputs keep native shortcuts');
+ await until(()=>!document.querySelector('[aria-label="Redo organisation change"]').disabled,'Redo ready');
+ key('Z',{ctrlKey:true,shiftKey:true});await until(()=>library.items.find(i=>i.id===2).projects.includes(7),'Ctrl+Shift+Z redo');
+ assert(document.querySelector('[aria-label="Redo organisation change"]').disabled,'Redo stays enabled at end');
+ await until(()=>!document.querySelector('[aria-label="Undo organisation change"]').disabled,'Undo ready');
+ document.querySelector('[aria-label="Undo organisation change"]').click();await until(()=>!library.items.find(i=>i.id===2).projects.length,'Undo button');
+ await until(()=>!document.querySelector('[aria-label="Redo organisation change"]').disabled,'Ctrl+Y ready');
+ document.querySelector('nav[aria-label=Library] button').focus();key('y',{ctrlKey:true});await until(()=>library.items.find(i=>i.id===2).projects.includes(7),'Ctrl+Y redo');
+ await until(()=>!document.querySelector('[aria-label="Undo organisation change"]').disabled,'Undo ready again');
+ key('z',{ctrlKey:true});await until(()=>!library.items.find(i=>i.id===2).projects.length,'Undo before button redo');
+ await until(()=>!document.querySelector('[aria-label="Redo organisation change"]').disabled,'Redo button ready');
+ document.querySelector('[aria-label="Redo organisation change"]').click();await until(()=>library.items.find(i=>i.id===2).projects.includes(7),'Redo button');
+ checks.push('Ctrl+Shift+Z, Ctrl+Y and Redo button restore undone changes; text fields retain native Redo');
+ document.querySelector('[data-category="3d"]').click();await until(()=>document.querySelector('[data-item-id="2"]'),'Open category');
+ document.querySelector('[data-item-id="2"] .card-open').focus();
+ key('v',{ctrlKey:true});key('v',{ctrlKey:true});
+ await until(()=>library.items.find(i=>i.id===100)?.category==='3d'&&document.querySelector('[data-item-id="100"]'),'Direct category paste');
+ await until(()=>calls.some(c=>c.command==='discard_capture'),'Staged clipboard cleanup');
+ assert(clipboardReads===1,'Overlapping paste read twice');assert(!document.querySelector('.capture-modal'),'Category paste opens a modal');
+ const savedInput=calls.find(c=>c.command==='capture_items').args.input;assert(savedInput.source==='Design'&&savedInput.files[0].name==='Pasted image.png','Wrong paste destination or file');
+ document.querySelector('[data-item-id="100"] .card-open').focus();key('v',{ctrlKey:true});
+ await until(()=>calls.filter(c=>c.command==='capture_items').length===2&&!document.querySelector('.capture-status'),'Repeated paste');
+ await pause(150);assert(library.items.filter(i=>i.id===100).length===1&&!document.querySelector('.capture-modal'),'Repeated paste duplicated or opened dialog');
+ checks.push('Image paste into a category saves immediately, suppresses overlapping pastes, cleans staged files and reuses duplicates');
+ captureFailure=true;key('v',{ctrlKey:true});await until(()=>document.querySelector('.error-banner')?.textContent.includes('Could not save'),'Paste failure shown');
+ assert(!document.querySelector('.capture-modal'),'Paste error opened modal');captureFailure=false;
+ clipboard='url';key('v',{ctrlKey:true});await until(()=>document.querySelector('.capture-modal'),'URL retains capture form');
+ document.querySelector('[aria-label="Close capture"]').click();await until(()=>!document.querySelector('.capture-modal'),'Close URL form');
+ document.querySelector('nav[aria-label=Categories] button').click();await pause(60);document.querySelector('nav[aria-label=Library] button').focus();clipboard='image';key('v',{ctrlKey:true});await until(()=>document.querySelector('.capture-modal'),'Overview retains capture form');
+ checks.push('Save errors stay inline; URLs and non-category views retain existing capture forms');
+ document.getElementById('check-result').textContent=JSON.stringify({ok:true,checks,width:innerWidth});
+}catch(error){document.getElementById('check-result').textContent=JSON.stringify({ok:false,error:String(error),checks,calls:calls.slice(-6)});}
+</script></body></html>

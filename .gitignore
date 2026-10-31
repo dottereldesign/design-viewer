@@ -1,0 +1,27 @@
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/binaries/
+*.log
+.DS_Store
+.tools/
+app/
+*.lnk
+tsconfig.tsbuildinfo
+
+# Personal library and local data
+/Design/
+/Photography/
+/Videos/
+*.sqlite
+*.sqlite-*
+*.db
+.env
+.env.*
+!.env.example
+
+# Generated schemas, installers and archives
+/src-tauri/gen/
+*.exe
+*.msi
+*.zip

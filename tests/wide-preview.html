@@ -1,0 +1,113 @@
+<!doctype html><html><head><meta charset="UTF-8"><title>Grid return automated check</title></head><body><div id="root"></div><pre id="check-result" hidden>pending</pre><script type="module">
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import App from '/src/App.tsx';
+import '/src/style.css';
+
+const image = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600"><rect width="800" height="600" fill="#dce5d3"/></svg>');
+const library = {
+  items: Array.from({ length: 420 }, (_, n) => ({ id: n + 1, name: `Reference ${String(n + 1).padStart(4, '0')}`, path: `C:/mock/${n + 1}.png`, kind: 'image', source: 'Design', modified: 1, added: n + 1, missing: false, tags: [1], projects: [7], favourites: [] })),
+  projects: [{ id: 7, name: 'Example project', count: 420 }], tags: [{ id: 1, name: 'School', count: 420 }], sources: ['Design', 'Photography', 'Videos'], root: 'C:/mock', scanning: false,
+};
+let callbackId = 0;
+window.isTauri = true;
+window.__TAURI_INTERNALS__ = {
+  transformCallback: () => ++callbackId,
+  convertFileSrc: () => image,
+  invoke: async (command) => {
+    if (command === 'get_library') return library;
+    if (command === 'get_media') return 'mock.png';
+    if (command.startsWith('plugin:event|')) return ++callbackId;
+    throw Error(`Unexpected command: ${command}`);
+  },
+};
+window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener() {} };
+createRoot(document.getElementById('root')).render(React.createElement(React.StrictMode, null, React.createElement(App)));
+const pause = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+async function until(test, label) {
+  const start = performance.now();
+  while (!test()) { if (performance.now() - start > 4000) throw Error(`Timed out: ${label}`); await pause(16); }
+}
+function assert(value, label) { if (!value) throw Error(label); }
+const viewer = () => document.querySelector('.viewer');
+function key(value) { document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: value, bubbles: true })); }
+async function advance(count, direction = 'ArrowRight') {
+  await pause(100);
+  for (let n = 0; n < count; n++) {
+    const before = viewer()?.dataset.itemId;
+    key(direction);
+    await until(() => viewer()?.dataset.itemId !== before, 'advance viewer');
+  }
+}
+async function returned(id, close = 'Escape') {
+  if (close === 'Escape') key('Escape');
+  else document.querySelector('.viewer [aria-label="Close viewer"]').click();
+  await until(() => !viewer() && document.activeElement?.closest('.card')?.dataset.itemId === String(id), `focus item ${id}`);
+  const card = document.activeElement.closest('.card');
+  const rect = card.getBoundingClientRect(), area = document.querySelector('.content').getBoundingClientRect();
+  assert(rect.top >= area.top - 1 && rect.bottom <= area.bottom + 1, `Returned item ${id} is not fully visible`);
+  assert(card.classList.contains('returned'), `Returned item ${id} is not highlighted`);
+  return document.querySelector('.content').scrollTop;
+}
+const checks = [];
+let resizeId = 0;
+async function resize(width) {
+  window.__resizeAction = { id: ++resizeId, width };
+  await until(() => window.__resizeActionDone === resizeId && innerWidth === width, 'resize window');
+  await pause(150);
+}
+try {
+  const originalWidth = innerWidth;
+  await until(() => document.querySelector('.card-open'), 'library render');
+  await pause(150);
+  document.querySelector('.card-open').click();
+  await until(() => viewer(), 'viewer opens');
+  assert(viewer().classList.contains('viewer-docked') === (originalWidth >= 1600), 'Initial breakpoint');
+  await resize(3440);
+  await until(() => viewer()?.classList.contains('viewer-docked'), 'dock viewer');
+  const main = document.querySelector('main'), sidebar = document.querySelector('.sidebar');
+  assert(!main.inert && !sidebar.inert, 'Library remains interactive');
+  assert(viewer().getAttribute('role') === 'region' && !viewer().hasAttribute('aria-modal'), 'Nonmodal preview semantics');
+  await until(() => document.querySelector('.card.previewed'), 'active thumbnail highlighted');
+  const rect = viewer().getBoundingClientRect(), grid = main.getBoundingClientRect();
+  assert(rect.left >= grid.right - 1 && rect.right <= innerWidth && grid.width > 1000, 'Preview sits beside grid');
+  assert(viewer().scrollWidth <= rect.width, 'Preview toolbar fits');
+  if (originalWidth >= 1600) assert(document.activeElement !== viewer(), 'Dock does not steal thumbnail focus');
+  const other = [...document.querySelectorAll('.card-open')].find(button => button.closest('.card').dataset.itemId !== viewer().dataset.itemId);
+  const otherId = other.closest('.card').dataset.itemId;
+  other.click();
+  await until(() => viewer()?.dataset.itemId === otherId, 'switch preview by clicking grid');
+  checks.push('Ultrawide layout, interactive library, active thumbnail and click-to-switch');
+  const content = document.querySelector('.content');
+  content.scrollTop = 1800;
+  await pause(150);
+  assert(content.scrollTop > 1000 && viewer().dataset.itemId === otherId, 'Grid scroll independent of preview');
+  const id = viewer().dataset.itemId;
+  await resize(1599);
+  await until(() => !viewer().classList.contains('viewer-docked') && main.inert, 'resize to overlay');
+  assert(viewer().dataset.itemId === id && viewer().getAttribute('aria-modal') === 'true', 'Resize retains item in modal');
+  await resize(1600);
+  await until(() => viewer().classList.contains('viewer-docked') && !main.inert, 'resize back to dock');
+  assert(viewer().dataset.itemId === id, 'Resize back retains item');
+  checks.push('Grid scrolls independently; 1599/1600 boundary switches without losing item');
+  key('ArrowRight');
+  await until(() => viewer()?.dataset.itemId !== id, 'arrow navigation');
+  const beforeClose = content.scrollTop;
+  document.querySelector('.viewer [aria-label="Close viewer"]').click();
+  await until(() => !viewer(), 'close dock');
+  await pause(150);
+  assert(Math.abs(content.scrollTop - beforeClose) < 3, 'Closing dock preserves browsing position');
+  document.querySelector('.card-open').click();
+  await until(() => viewer(), 'reopen dock');
+  const search = document.querySelector('[aria-label="Search library"]');
+  search.focus();
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(search, 'Reference 0001');
+  search.dispatchEvent(new Event('input', { bubbles: true }));
+  await until(() => !viewer(), 'filter closes excluded preview');
+  assert(document.activeElement === search, 'Search retains focus');
+  checks.push('Arrow navigation, close preserves scroll, search remains usable and clears excluded preview');
+  document.getElementById('check-result').textContent = JSON.stringify({ ok: true, checks, width: originalWidth });
+} catch (error) {
+  document.getElementById('check-result').textContent = JSON.stringify({ ok: false, error: String(error), checks });
+}
+</script></body></html>

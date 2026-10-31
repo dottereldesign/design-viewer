@@ -1,0 +1,37 @@
+[
+  {
+    "name": "LensCulture",
+    "url": "https://www.lensculture.com/",
+    "category": "Photography"
+  },
+  {
+    "name": "British Journal of Photography",
+    "url": "https://www.1854.photography/",
+    "category": "Photography"
+  },
+  {
+    "name": "Colossal — Photography",
+    "url": "https://www.thisiscolossal.com/category/photography/",
+    "category": "Photography"
+  },
+  {
+    "name": "Behance — Photography",
+    "url": "https://www.behance.net/galleries/photography",
+    "category": "Photography"
+  },
+  {
+    "name": "Flickr Explore",
+    "url": "https://www.flickr.com/explore",
+    "category": "Photography"
+  },
+  {
+    "name": "Unsplash",
+    "url": "https://unsplash.com/",
+    "category": "Photography"
+  },
+  {
+    "name": "Pexels",
+    "url": "https://www.pexels.com/",
+    "category": "Photography"
+  }
+]

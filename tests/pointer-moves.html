@@ -1,0 +1,36 @@
+<!doctype html><html><head><meta charset="UTF-8"><title>Real pointer category moves</title></head><body><div id="root"></div><pre id="check-result" hidden>pending</pre><script type="module">
+import React from 'react';import {createRoot} from 'react-dom/client';import App from '/src/App.tsx';import '/src/style.css';
+const image='data:image/svg+xml,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300"><rect width="400" height="300" fill="tan"/></svg>');
+const library={items:Array.from({length:350},(_,n)=>({id:n+1,name:`Reference ${n+1}`,source:'Design/3D',category:'3D',kind:n%3===0?'animation':'image',path:`C:/Design/${n+1}.png`,modified:1,added:n+1,missing:false,tags:[1],projects:[7]})),categories:['3D','Branding','Logo',...Array.from({length:24},(_,n)=>`Other ${String(n).padStart(2,'0')}`)],projects:[{id:7,name:'Website',count:350},{id:8,name:'New project',count:0}],tags:[{id:1,name:'Keep',count:350}],sources:['Design/3D'],root:'C:/Design',scanning:false};
+const history=[],calls=[];let callback=0;window.isTauri=true;window.__TAURI_INTERNALS__={transformCallback:()=>++callback,convertFileSrc:()=>image,invoke:async(command,args)=>{
+ calls.push({command,args});if(command==='get_library')return {...structuredClone(library),undo_label:history.length?'Change category':null};if(command.startsWith('plugin:event|'))return ++callback;if(command==='get_media')return 'C:/mock.png';
+ if(command==='update'){const c=args.change;if(c.action==='undo_organisation'){library.items=history.pop();return;}history.push(structuredClone(library.items));if(c.action==='set_category')for(const i of library.items.filter(i=>c.ids.includes(i.id)))i.category=c.value;else if(c.action==='add_project')for(const i of library.items.filter(i=>c.ids.includes(i.id)))i.projects.push(c.target);else throw Error(c.action);return;}throw Error(command);
+}};window.__TAURI_EVENT_PLUGIN_INTERNALS__={unregisterListener(){}};
+createRoot(document.getElementById('root')).render(React.createElement(React.StrictMode,null,React.createElement(App)));
+const pause=ms=>new Promise(r=>setTimeout(r,ms)),assert=(ok,label)=>{if(!ok)throw Error(label);};
+async function until(test,label){const start=performance.now();while(!test()){if(performance.now()-start>10000)throw Error('Timed out: '+label);await pause(20);}}
+const category=name=>document.querySelector(`[data-category="${name}"]`),checks=[];
+const events=[];for(const type of ['pointerdown','pointermove','pointerup','pointercancel','lostpointercapture','dragstart'])document.addEventListener(type,e=>{events.push({type,target:e.target.className,x:e.clientX,y:e.clientY,primary:e.isPrimary,buttons:e.buttons});if(events.length>30)events.shift();},true);
+let actionId=0;
+async function drag(target,{during,escape=false,ctrl=false,pause:delay=0,scrollTarget=true}={}){
+ document.querySelector('.content').scrollTop=0;if(scrollTarget)target.scrollIntoView({block:'center'});await pause(100);
+ const content=document.querySelector('.content').getBoundingClientRect();const card=[...document.querySelectorAll('.card .card-open')].find(el=>{const r=el.getBoundingClientRect();return r.top>=content.top&&r.bottom<=innerHeight;});assert(card,'Visible drag source missing');const from=card.getBoundingClientRect(),to=target.getBoundingClientRect();window.__duringPointerDrag=during;
+ window.__checkPointerDrag=()=>{window.__dragSnapshot={badge:document.querySelector('.item-drag-badge')?.textContent,highlight:target.classList.contains('drop-target'),scroll:document.querySelector('.source-list').scrollTop};};
+ window.__pointerAction={id:++actionId,from:{x:from.left+from.width/2,y:from.top+from.height/2},to:{x:to.left+to.width/2,y:to.top+Math.min(to.height/2,12)},escape,ctrl,pause:delay};
+ await until(()=>window.__pointerActionDone===actionId,'Native mouse action');await pause(40);assert(!document.querySelector('.viewer'),'Drag opened full viewer');assert(!document.querySelector('.item-drag-badge'),'Badge stuck after release');
+}
+try{
+ await until(()=>document.querySelectorAll('.card').length>0&&category('Branding'),'Initial library');
+ const first=document.querySelector('.card .card-open');first.focus();first.dispatchEvent(new KeyboardEvent('keydown',{key:'a',ctrlKey:true,bubbles:true,cancelable:true}));await until(()=>document.querySelector('.selection-bar')?.textContent.includes('350 selected'),'Select 350');
+ await drag(category('Branding'),{ctrl:true,during:()=>{const scroller=document.querySelector('.content');if(scroller)scroller.scrollTop=12000;}});
+ await until(()=>library.items.every(i=>i.category==='Branding'),'350 reference move');assert(window.__dragSnapshot.badge?.startsWith('350Move to Branding')&&window.__dragSnapshot.highlight,'Bulk feedback missing');assert(library.items.every(i=>i.projects[0]===7&&i.tags[0]===1),'Curation changed');checks.push('Real mouse drag moves 350 selected references with Ctrl held and the source grid scrolled, preserving curation');
+ await drag(category('Logo'));await until(()=>library.items.filter(i=>i.category==='Logo').length===1,'Move after bulk');
+ await drag(category('3D'));await until(()=>library.items.filter(i=>i.category==='3D').length===1,'Repeated move');
+ const changes=calls.filter(c=>c.command==='update').length;await drag(category('Branding'),{escape:true});assert(calls.filter(c=>c.command==='update').length===changes,'Escape still dropped');await drag(category('Logo'));checks.push('Further drags work after bulk changes and after Escape cancellation, without opening the viewer');
+ const project=document.querySelector('[data-project-id="8"]');await drag(project);await until(()=>library.items.some(i=>i.projects.includes(8)),'Project drop');checks.push('The same direct drag adds references to projects');
+ const list=document.querySelector('.source-list');list.scrollTop=0;await pause(30);const rect=list.getBoundingClientRect();const fake={scrollIntoView(){},classList:{contains(){return true;}},getBoundingClientRect:()=>({left:rect.left,top:rect.bottom-8,width:rect.width,height:8})};
+ await drag(fake,{pause:600,scrollTarget:false,escape:true});assert(window.__dragSnapshot.scroll>0,'Category list did not auto-scroll');checks.push('Hovering near the category list edge auto-scrolls to further destinations');
+ document.querySelector('.content').scrollTop=0;await pause(80);const r=document.querySelector('.card .card-open').getBoundingClientRect();const point={x:r.left+r.width/2,y:r.top+r.height/2};window.__pointerAction={id:++actionId,from:point,to:point,click:true};await until(()=>window.__pointerActionDone===actionId&&document.querySelector('.viewer'),'Normal click opens viewer');checks.push('An ordinary click still opens the viewer after dragging and cancellation');
+ document.getElementById('check-result').textContent=JSON.stringify({ok:true,checks,width:innerWidth});
+}catch(error){document.getElementById('check-result').textContent=JSON.stringify({ok:false,error:String(error),checks,snapshot:window.__dragSnapshot,action:window.__pointerAction,events,calls:calls.slice(-3)});}
+</script></body></html>

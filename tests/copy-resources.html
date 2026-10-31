@@ -1,0 +1,112 @@
+<!doctype html><html><head><meta charset="UTF-8"><title>Copy and Resources automated checks</title></head><body><div id="root"></div><pre id="check-result" hidden>pending</pre><script type="module">
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import App from '/src/App.tsx';
+import '/src/style.css';
+const image = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="500" height="300"><rect width="500" height="300" fill="#c9dac0"/></svg>');
+const item = (id, name, kind = 'image', source = 'Design', path = `C:/mock/${id}.png`) => ({ id, name, kind, source, path, added: id, modified: 1, missing: false, tags: [], projects: [], favourites: [] });
+const library = { items: [item(1, 'Alpha'), item(2, 'Video', 'video'), item(3, 'Motion', 'animation'), item(4, 'Old link', 'link', '', 'https://old.example/reference'), item(5, 'Existing resource', 'link', 'Resources/Websites', 'https://resource.example/')], projects: [{ id: 7, name: 'Example project', count: 0 }], tags: [{ id: 1, name: 'School', count: 0 }], sources: ['Design', 'Photography', 'Videos'], root: 'C:/mock', scanning: false };
+library.items.push(item(50, 'Photography inspiration', 'link', 'Resources/Photography', 'https://www.lensculture.com/'));
+const calls = [];
+const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+let callbackId = 0;
+window.isTauri = true;
+window.__TAURI_INTERNALS__ = {
+  transformCallback: () => ++callbackId, convertFileSrc: () => image,
+  invoke: async (command, args) => {
+    calls.push({ command, args });
+    if (command === 'get_library') return structuredClone(library);
+    if (command === 'get_media') return 'mock.png';
+    if (command.startsWith('plugin:event|')) return ++callbackId;
+    if (command === 'open_external_url') return;
+    if (command === 'copy_image') { await pause(40); return; }
+    if (command === 'read_clipboard') return { files: [], url: 'https://new.example/reference' };
+    if (command === 'discard_capture') return;
+    if (command === 'capture_items') {
+      const input = args.input, saved = item(6, input.name || 'New resource', 'link', input.resource ? 'Resources' : '', input.url);
+      saved.tags = input.tags; saved.projects = input.projects; library.items.push(saved);
+      return { ids: [6], added: 1, reused: 0, destination: input.resource ? 'resources' : 'links' };
+    }
+    if (command === 'update' && args.change.action === 'set_link_destination') {
+      library.items.find(item => item.id === args.change.target).source = args.change.value === 'resources' ? 'Resources' : '';
+      return;
+    }
+    throw Error(`Unexpected mock command: ${command}`);
+  },
+};
+window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener() {} };
+createRoot(document.getElementById('root')).render(React.createElement(React.StrictMode, null, React.createElement(App)));
+function assert(value, label) { if (!value) throw Error(label); }
+async function until(test, label) { const start = performance.now(); while (!test()) { if (performance.now() - start > 5000) throw Error(`Timed out: ${label}`); await pause(20); } }
+const countCopies = () => calls.filter(call => call.command === 'copy_image').length;
+async function copy(action) { const before = countCopies(); action(); await until(() => countCopies() === before + 1, 'copy command'); await pause(100); }
+function menuButton(text) { return [...document.querySelectorAll('[role=menuitem]')].find(button => button.textContent.trim() === text); }
+function navigate(name) { [...document.querySelectorAll('nav[aria-label=Library] button')].find(button => button.querySelector('span')?.textContent === name).click(); }
+function setInput(element, value) { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(element, value); element.dispatchEvent(new Event('input', { bubbles: true })); }
+const checks = [];
+try {
+  await until(() => document.querySelector('[data-item-id="1"] .card-open'), 'library');
+  assert(!document.querySelector('[data-item-id="2"] button[aria-label^="Copy"]'), 'Video should not offer image copy');
+  await copy(() => document.querySelector('[aria-label="Copy Alpha to clipboard"]').click());
+  checks.push('One-click thumbnail button copies the chosen image');
+  document.querySelector('.card[data-item-id="1"]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 300, clientY: 250 }));
+  await until(() => menuButton('Copy image'), 'copy menu');
+  await copy(() => menuButton('Copy image').click());
+  checks.push('Right-click Copy image uses the same image');
+  document.querySelector('[data-item-id="1"] .card-open').click();
+  await until(() => document.querySelector('.viewer'), 'viewer');
+  await copy(() => document.querySelector('.viewer [aria-label="Copy image"]').click());
+  await copy(() => document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', ctrlKey: true, bubbles: true })));
+  assert(calls.filter(call => call.command === 'copy_image').every(call => call.args.id === 1), 'Wrong image copied');
+  checks.push('Viewer clipboard button and Ctrl+C copy the active image');
+  document.querySelector('[aria-label="Close viewer"]').click();
+  await until(() => !document.querySelector('.viewer'), 'viewer close');
+  navigate('Resources');
+  await until(() => document.querySelector('.resources-view'), 'resources view');
+  const favourites = document.querySelector('[aria-label="Favourite websites"]');
+  assert(favourites && favourites.getBoundingClientRect().bottom <= document.querySelector('.resources-filter').getBoundingClientRect().top,'Favourite row is not above filter');
+  const favouriteButtons = [...favourites.querySelectorAll('button')];
+  assert(favouriteButtons.map(button=>button.textContent).join(',') === 'Pinterest,Dribbble,Awwwards','Wrong favourite order or labels');
+  for (const button of favouriteButtons) { assert(button.querySelector('svg'),'Shortcut icon missing'); button.click(); }
+  await until(()=>calls.filter(call=>call.command==='open_external_url').length===3,'Shortcut links open');
+  assert(JSON.stringify(calls.filter(call=>call.command==='open_external_url').map(call=>call.args.url)) === JSON.stringify(['https://www.pinterest.com/','https://dribbble.com/','https://www.awwwards.com/']),'Shortcut destination incorrect');
+  checks.push('Coloured favourite shortcuts sit above the filter and open Pinterest, Dribbble and Awwwards');
+  const category = document.querySelector('[aria-label="Resource category"]');
+  assert([...category.options].some(option=>option.value==='Photography'),'Photography filter missing');
+  category.value='Photography'; category.dispatchEvent(new Event('change',{bubbles:true}));
+  await until(()=>document.querySelector('.resources-table tbody tr')?.textContent.includes('Photography inspiration'),'Photography filter shows inspiration link');
+  assert(document.querySelectorAll('.resources-table tbody tr').length===1,'Photography filter includes other resources');
+  assert(favourites.querySelectorAll('button').length===3,'Category filter hides favourites');
+  checks.push('Photography resource category filters inspiration sites');
+  category.value = 'Websites'; category.dispatchEvent(new Event('change', { bubbles: true }));
+  setInput(document.querySelector('[aria-label="Search library"]'), 'no-match');
+  await pause(100);
+  document.querySelector('.resources-view').tabIndex = -1; document.querySelector('.resources-view').focus();
+  document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'v', ctrlKey: true, bubbles: true }));
+  await until(() => document.querySelector('.capture-modal'), 'paste capture');
+  assert(document.querySelector('[aria-label="Save link to"]').value === 'resources', 'Paste did not default to Resources');
+  setInput(document.querySelector('.capture-modal input:not([type=url])'), 'My resource');
+  [...document.querySelectorAll('.capture-modal .capture-assign button')].find(button => button.textContent.trim() === 'Example project').click();
+  await until(() => [...document.querySelectorAll('.capture-modal .capture-assign button.chosen')].some(button => button.textContent.trim() === 'Example project'), 'project selected');
+  [...document.querySelectorAll('.capture-modal .capture-assign button')].find(button => button.textContent.trim() === 'School').click();
+  await until(() => [...document.querySelectorAll('.capture-modal .capture-assign button.chosen')].some(button => button.textContent.trim() === 'School'), 'tag selected');
+  document.querySelector('.capture-modal button[type=submit]').click();
+  await until(() => !document.querySelector('.capture-modal') && document.querySelector('.resources-table [data-item-id="6"]'), 'saved resource appears');
+  const saved = calls.find(call => call.command === 'capture_items').args.input;
+  assert(saved.resource && saved.projects[0] === 7 && saved.tags[0] === 1, 'Destination or metadata lost');
+  assert(document.querySelector('[aria-label="Resource category"]').value === '' && document.querySelector('[aria-label="Search library"]').value === '', 'New resource is hidden by old filters');
+  checks.push('Pasting in Resources defaults there, shows the saved link and keeps projects/tags');
+  navigate('Links');
+  await until(() => document.querySelector('.links-table [data-item-id="4"]'), 'links view');
+  assert(!document.querySelector('.links-table [data-item-id="6"]'), 'Resource leaked into Links');
+  document.querySelector('.links-table [data-item-id="4"]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 300, clientY: 250 }));
+  await until(() => menuButton('Move to Resources'), 'move menu'); menuButton('Move to Resources').click();
+  await until(() => !document.querySelector('.links-table [data-item-id="4"]'), 'link moved');
+  navigate('Resources');
+  await until(() => document.querySelector('.resources-table [data-item-id="4"]'), 'moved link appears');
+  document.querySelector('[aria-label="Actions for My resource"]').click();
+  await until(() => menuButton('Edit link') && menuButton('Tags') && menuButton('Move to Links'), 'resource actions');
+  checks.push('Resources stay separate from Links; misplaced links can move there and have edit/tag/project actions');
+  document.getElementById('check-result').textContent = JSON.stringify({ ok: true, checks, width: innerWidth });
+} catch (error) { document.getElementById('check-result').textContent = JSON.stringify({ ok: false, checks, error: String(error), calls: calls.filter(call => !['get_media', 'get_library'].includes(call.command)).slice(-8) }); }
+</script></body></html>
