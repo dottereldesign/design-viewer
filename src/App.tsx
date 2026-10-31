@@ -46,6 +46,8 @@ import {
 } from "lucide-react";
 import { changeLibrary, loadLibrary, media, type Change } from "./api";
 import { canCopyImage, isResource, isBoardLink, isCollectionLink, boardNames, isBoardDestination, type BoardKey, type LinkDestination, filterItems, type Item, type Label, type Library } from "./model";
+import LibraryExport from "./LibraryExport";
+import AppInfo from "./AppInfo";
 import QuickPreview from "./QuickPreview";
 import useItemDragFeedback from "./useItemDragFeedback";
 import ZoomImage from "./ZoomImage";
@@ -232,6 +234,7 @@ export default function App() {
     query.addEventListener("change", update);
     return () => query.removeEventListener("change", update);
   }, []);
+  const [libraryExportOpen,setLibraryExportOpen]=useState(false);
   const [quickPreview,setQuickPreview]=useState<number|null>(null);
   const previewCandidate=useRef<number|null>(null);
   const undoBusy=useRef(false);
@@ -492,6 +495,7 @@ export default function App() {
       const typing = (e.target as HTMLElement)?.matches(
         "input,textarea,select,[contenteditable=true]",
       );
+      if(libraryExportOpen)return;
       if(quickPreview!==null){
         if(e.key==="Escape"||(e.key===" "&&!typing&&!(e.target as HTMLElement).closest("button,video"))){e.preventDefault();if(!e.repeat)setQuickPreview(null);}
         if(!typing&&(e.key==="ArrowRight"||e.key==="ArrowLeft")){e.preventDefault();const n=filtered.findIndex(i=>i.id===quickPreview);setQuickPreview(filtered[(n+(e.key==="ArrowRight"?1:-1)+filtered.length)%filtered.length]?.id??null);}
@@ -549,7 +553,7 @@ export default function App() {
     };
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
-  }, [modal, viewer, filtered, moveViewer, capture, duplicatesOpen, removedOpen, itemMenu, selected, removeItems, closeViewer, activeItem, copyImage, videoDialog, quickPreview, undoLast, redoLast, widePreview]);
+  }, [modal, viewer, filtered, moveViewer, capture, duplicatesOpen, removedOpen, itemMenu, selected, removeItems, closeViewer, activeItem, copyImage, videoDialog, quickPreview, undoLast, redoLast, widePreview, libraryExportOpen]);
   const pasteCapture = useCallback(async () => {
     if(pasteBusy.current)return;
     pasteBusy.current=true;
@@ -625,7 +629,7 @@ export default function App() {
         !(e.target as HTMLElement).closest(
           "input,textarea,select,[contenteditable=true]",
         ) &&
-        quickPreview === null && !capture &&
+        quickPreview === null && !libraryExportOpen && !capture &&
         !videoDialog &&
         !duplicatesOpen &&
         !removedOpen &&
@@ -673,7 +677,7 @@ export default function App() {
       window.removeEventListener("dragleave", leave);
       window.removeEventListener("drop", drop);
     };
-  }, [pasteCapture, report, capture, duplicatesOpen, removedOpen, modal, resourcesView, linkDestination, videoView, videoDialog,quickPreview]);
+  }, [pasteCapture, report, capture, duplicatesOpen, removedOpen, modal, resourcesView, linkDestination, videoView, videoDialog,quickPreview,libraryExportOpen]);
   const captured = async (result: CaptureResult) => {
     if(category!==null && capture?.files.length && result.ids.length) await changeLibrary({action:"set_category",ids:result.ids,value:category});
     await refresh();
@@ -772,7 +776,7 @@ export default function App() {
     onTags={id=>setModal({kind:"tags",ids:[id]})} onDelete={id=>void removeItems([id])} project={project}
     onPin={item=>project&&void perform({action:item.favourites?.includes(project)?"unpin_project":"pin_project",target:project,ids:[item.id]})}/>;
   const itemDrag=useItemDragFeedback({
-    enabled:(viewer===null||widePreview)&&quickPreview===null&&!modal&&!capture&&!videoDialog&&!duplicatesOpen&&!removedOpen&&!itemMenu,
+    enabled:(viewer===null||widePreview)&&quickPreview===null&&!modal&&!capture&&!videoDialog&&!duplicatesOpen&&!removedOpen&&!itemMenu&&!libraryExportOpen,
     ids:id=>selected.has(id)?[...selected]:[id],
     category:(ids,name)=>void changeCategory(ids,name).catch(report),
     project:(ids,target)=>void mutate({action:"add_project",ids,target}).then(()=>{setUndoIds([]);setNotice("Added to project");}).catch(report),
@@ -798,7 +802,7 @@ export default function App() {
     >
       <aside
         className="sidebar"
-        inert={quickPreview !== null || (viewer !== null && !widePreview) || !!modal || !!capture || !!videoDialog || duplicatesOpen || removedOpen}
+        inert={quickPreview !== null || (viewer !== null && !widePreview) || !!modal || !!capture || !!videoDialog || duplicatesOpen || removedOpen || libraryExportOpen}
       >
         <div className="brand">
           <Grid2X2 size={18} strokeWidth={1.7} />
@@ -947,7 +951,7 @@ export default function App() {
           aria-orientation="vertical"
         />
       </aside>
-      <main inert={quickPreview !== null || (viewer !== null && !widePreview) || !!modal || !!capture || !!videoDialog || duplicatesOpen || removedOpen}>
+      <main inert={quickPreview !== null || (viewer !== null && !widePreview) || !!modal || !!capture || !!videoDialog || duplicatesOpen || removedOpen || libraryExportOpen}>
         <header className="topbar">
           <div className="view-title">
             <h1>{title}</h1>
@@ -1249,7 +1253,7 @@ export default function App() {
         <Viewer
           key={activeItem.id}
           docked={dockedPreview}
-          blocked={quickPreview !== null || !!modal || !!capture || !!videoDialog || duplicatesOpen || removedOpen}
+          blocked={quickPreview !== null || !!modal || !!capture || !!videoDialog || duplicatesOpen || removedOpen || libraryExportOpen}
           item={activeItem}
           items={images}
           tags={lib.tags}
@@ -1292,6 +1296,7 @@ export default function App() {
           report={report}
           project={project}
           chooseRoot={chooseRoot}
+          exportLibrary={()=>{setModal(null);setLibraryExportOpen(true);}}
           backup={backup}
           duplicates={() => {
             setModal(null);
@@ -1308,6 +1313,7 @@ export default function App() {
       {videoDialog && <VideoDownloadDialog initialUrl={videoDialog.url} lib={lib} project={project} close={()=>setVideoDialog(null)} add={(text,projects,tags)=>{
         const result=videoQueue.add(text,projects,tags);setVideoDialog(null);setQueueOpen(true);setNotice(result.added?`${result.added} queued`:"Already queued");
       }}/>}
+      {libraryExportOpen && <LibraryExport close={()=>setLibraryExportOpen(false)}/>}
       {capture && (
         <CaptureDialog
           draft={capture}
@@ -1993,6 +1999,7 @@ function Dialog({
   report,
   project,
   chooseRoot,
+  exportLibrary,
   backup,
   setModal,
   onDeleteProject,
@@ -2008,6 +2015,7 @@ function Dialog({
   report: (e: unknown) => void;
   project: number | null;
   chooseRoot: () => Promise<void>;
+  exportLibrary: () => void;
   backup: (restore: boolean) => Promise<void>;
   setModal: (m: Modal) => void;
   onDeleteProject: (id: number) => void;
@@ -2228,6 +2236,8 @@ function Dialog({
             </div>
             <div className="setting-block">
               <span className="setting-label">Backup</span>
+              <button className="primary" onClick={exportLibrary}><Download size={14}/> Export full library</button>
+              <small>Original media, saved links and organisation in one portable folder.</small>
               <div className="button-row">
                 <button
                   className="subtle-button"
@@ -2259,6 +2269,7 @@ function Dialog({
               </button>
               <small>Original files stay in your source folder.</small>
             </div>
+            <AppInfo/>
             <div className="shortcuts">
               <span>Quick preview <kbd>Space</kbd></span>
               <span>Undo organisation <kbd>Ctrl Z</kbd></span>

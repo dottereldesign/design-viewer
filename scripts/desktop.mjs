@@ -1,7 +1,8 @@
 import { existsSync, readdirSync, realpathSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { spawn } from "node:child_process";
-import { mkdir, copyFile } from "node:fs/promises";
+import { spawn, execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { mkdir, copyFile, rename } from "node:fs/promises";
 
 // Use the optional portable compiler for this process only. An installed Visual
 // Studio toolchain remains supported by Cargo when this folder is absent.
@@ -85,14 +86,28 @@ child.on("exit", async (code) => {
   if (code === 0 && action === "build") {
     try {
       await mkdir("app/binaries", { recursive: true });
-      await copyFile(
-        join(
-          env.CARGO_TARGET_DIR,
-          process.argv.includes("--debug") ? "debug" : "release",
-          "design-viewer.exe",
-        ),
-        "app/Design.exe",
-      );
+      const binary = join(env.CARGO_TARGET_DIR, process.argv.includes("--debug") ? "debug" : "release", "design-viewer.exe");
+      try { await copyFile(binary, "app/Design.exe"); }
+      catch (error) {
+        if (!["EBUSY", "EPERM", "EACCES"].includes(error.code) || !existsSync("app/Design.exe")) throw error;
+        // Windows can rename a running executable; the process keeps its old
+        // image while the usual shortcut starts the new file next time.
+        const previous = `app/Design.previous-${Date.now()}.exe`;
+        await rename("app/Design.exe", previous);
+        try { await copyFile(binary, "app/Design.exe"); }
+        catch (copyError) { await rename(previous, "app/Design.exe"); throw copyError; }
+      }
+      const version = JSON.parse(readFileSync("package.json", "utf8")).version;
+      const sha256 = createHash("sha256").update(readFileSync("app/Design.exe")).digest("hex");
+      let commit = "uncommitted";
+      try { commit = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8", windowsHide: true }).trim(); } catch {}
+      const dirty = execFileSync("git", ["status", "--porcelain"], { encoding: "utf8", windowsHide: true }).trim().length > 0;
+      writeFileSync("app/build.json", JSON.stringify({ version, commit, dirty, sha256, builtAt: new Date().toISOString() }, null, 2) + "\n");
+      if (!process.argv.includes("--no-bundle") && !process.argv.includes("--debug")) {
+        const installer = join(env.CARGO_TARGET_DIR, "release", "bundle", "nsis", `Design_${version}_x64-setup.exe`);
+        if (!existsSync(installer)) throw Error("Windows installer was not created");
+        await copyFile(installer, "app/Design-Setup.exe");
+      }
       await copyFile(
         "src-tauri/binaries/ffmpeg.exe",
         "app/binaries/ffmpeg.exe",

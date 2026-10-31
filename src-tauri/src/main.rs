@@ -9,6 +9,7 @@ mod resources;
 mod sources;
 mod thumbnail;
 mod history;
+mod library_export;
 use db::{err, Result};
 use notify::Watcher;
 use std::{
@@ -33,7 +34,23 @@ struct State {
     media_slots: Arc<tokio::sync::Semaphore>,
     content_lock: Arc<std::sync::Mutex<()>>,
     index_progress: Arc<std::sync::Mutex<Option<content::DuplicateProgress>>>,
+    exporting: Arc<AtomicBool>,
+    export_cancel: Arc<AtomicBool>,
 }
+#[tauri::command]
+fn app_version() -> &'static str { env!("CARGO_PKG_VERSION") }
+#[tauri::command]
+async fn export_library(path: String, name: String, on_progress: tauri::ipc::Channel<library_export::Progress>, state: tauri::State<'_, State>) -> Result<library_export::ExportResult> {
+    let s=state.inner().clone();
+    if s.exporting.compare_exchange(false,true,Ordering::SeqCst,Ordering::SeqCst).is_err() {return Err("A library export is already running.".into());}
+    s.export_cancel.store(false,Ordering::SeqCst);
+    let active=s.exporting.clone();
+    let result=tauri::async_runtime::spawn_blocking(move || library_export::export(&s.db,std::path::Path::new(&path),&name,&s.export_cancel,&mut |progress|{let _=on_progress.send(progress);})).await.map_err(err);
+    active.store(false,Ordering::SeqCst);
+    result?
+}
+#[tauri::command]
+fn cancel_library_export(state: tauri::State<'_, State>) {state.export_cancel.store(true,Ordering::SeqCst);}
 #[tauri::command]
 async fn get_library(state: tauri::State<'_, State>) -> Result<db::Library> {
     let s = state.inner().clone();
@@ -134,6 +151,7 @@ async fn backup(
     .map_err(err)??;
     if restore {
         for item in db::load(&db_path, false)?.items {
+            if !item.thumbnail.is_empty() {let _=app.asset_protocol_scope().allow_file(&item.thumbnail);}
             if item.kind != "link" {
                 app.asset_protocol_scope()
                     .allow_file(&item.path)
@@ -358,6 +376,7 @@ fn main() {
             }
             // Restored references may live outside the current source folder.
             for item in db::load(&db_path, false)?.items {
+                if !item.thumbnail.is_empty() {let _=app.asset_protocol_scope().allow_file(&item.thumbnail);}
                 if item.kind != "link" {
                     let _ = app.asset_protocol_scope().allow_file(&item.path);
                 }
@@ -384,6 +403,8 @@ fn main() {
                 media_slots: Arc::new(tokio::sync::Semaphore::new(3)),
                 content_lock: Arc::new(std::sync::Mutex::new(())),
                 index_progress: Arc::new(std::sync::Mutex::new(None)),
+                exporting: Arc::new(AtomicBool::new(false)),
+                export_cancel: Arc::new(AtomicBool::new(false)),
             };
             app.manage(state.clone());
             scan_background(app.handle().clone(), state.clone());
@@ -438,6 +459,9 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             open_external_url,
+            app_version,
+            export_library,
+            cancel_library_export,
             get_library,
             update,
             get_media,

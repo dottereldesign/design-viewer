@@ -25,3 +25,11 @@ tsconfig.tsbuildinfo
 *.exe
 *.msi
 *.zip
+
+# Portable library exports (personal files)
+**/library.json
+**/manifest.json
+**/links.csv
+**/links.html
+**/INCOMPLETE.txt
+Design Backup*/

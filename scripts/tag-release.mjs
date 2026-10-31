@@ -1,0 +1,14 @@
+import './check-version.mjs';
+import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+const git = args => execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] }).trim();
+if (git(['branch', '--show-current']) !== 'main') throw Error('Release only from main');
+if (git(['status', '--porcelain'])) throw Error('Commit or set aside local changes before releasing');
+git(['fetch', 'origin', 'main']);
+if (git(['rev-parse', 'HEAD']) !== git(['rev-parse', 'origin/main'])) throw Error('Local main must match origin/main');
+const version = JSON.parse(readFileSync('package.json', 'utf8')).version;
+const tag = `v${version}`;
+if (git(['tag', '--list', tag])) throw Error(`${tag} already exists; bump the version for another app release`);
+git(['tag', '-a', tag, '-m', `Design ${version}`]);
+git(['push', 'origin', tag]);
+console.log(`Published ${tag}; wait for the Windows release workflow before reporting completion.`);
