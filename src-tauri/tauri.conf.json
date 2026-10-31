@@ -29,7 +29,7 @@
   "bundle": {
     "active": true,
     "targets": ["nsis"],
-    "resources": ["binaries/ffmpeg.exe", "binaries/yt-dlp.exe", "binaries/yt-dlp-licenses.txt", "binaries/ffmpeg-license.txt", "binaries/ffmpeg-readme.txt", "../THIRD_PARTY_NOTICES.md"],
+    "resources": ["binaries/ffmpeg.exe", "binaries/yt-dlp.exe", "binaries/yt-dlp-licenses.txt", "binaries/ffmpeg-license.txt", "binaries/ffmpeg-readme.txt", "../THIRD_PARTY_NOTICES.md", "../LICENSE"],
     "windows": {
       "nsis": { "installMode": "currentUser" },
       "webviewInstallMode": { "type": "downloadBootstrapper", "silent": true }

@@ -594,6 +594,11 @@ pub fn import(path: &Path, source: PathBuf) -> Result<()> {
                 r.get(0)
             })
             .map_err(err)?;
+        if backup.portable {
+            // A complete portable restore carries the saved names and link
+            // thumbnails, including resources already seeded by a fresh app.
+            tx.execute("UPDATE items SET name=?,source=?,source_url=?,thumbnail=?,archived=0 WHERE id=?",params![item.name,item.source,item.source_url,item.thumbnail,id]).map_err(err)?;
+        }
         if item.kind != "link" {
             if let Some(category) = &item.category {
                 // Archived items keep their category too when merging a backup.

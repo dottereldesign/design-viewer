@@ -115,7 +115,7 @@ fn run(conn: &rusqlite::Connection, output: &Path, cancel: &AtomicBool, progress
         let target=output.join(&job.relative);
         fs::create_dir_all(target.parent().unwrap()).map_err(err)?;
         let temporary=target.with_extension("part");
-        let mut source=fs::File::open(&job.source).map_err(err)?;
+        let mut source=fs::File::open(&job.source).map_err(|e|format!("Could not read {}: {e}",status.current))?;
         let before=source.metadata().map_err(err)?;
         let mut writer=fs::OpenOptions::new().write(true).create_new(true).open(&temporary).map_err(err)?;
         let mut hash=Sha256::new();
@@ -203,12 +203,13 @@ mod tests {
         assert_eq!(events.last().unwrap().phase,"complete");assert_eq!(events.last().unwrap().copied_bytes,events.last().unwrap().total_bytes);
         let moved=temp.path().join("moved backup");fs::rename(&root,&moved).unwrap();
         let restored=temp.path().join("restore");fs::create_dir(&restored).unwrap();let restored=restored.join("library.sqlite");db::init(&restored).unwrap();
+        db::connect(&restored).unwrap().execute("INSERT INTO items(path,name,kind,source,added) VALUES('https://example.com/?a=1&b=2','Pre-seeded name','link','Resources',0)",[]).unwrap();
         db::import(&restored,moved.join("library.json")).unwrap();
         let lib=db::load(&restored,false).unwrap();assert_eq!(lib.items.len(),5);
         let first=lib.items.iter().find(|i|i.name=="Reference 1").unwrap();
         assert_eq!(fs::read(&first.path).unwrap(),b"original bytes 1");assert!(Path::new(&first.path).starts_with(moved.canonicalize().unwrap()));
         assert_eq!(first.category.as_deref(),Some("My category"));assert_eq!(first.projects.len(),1);assert_eq!(first.tags.len(),1);assert_eq!(first.favourites.len(),1);
-        let link=lib.items.iter().find(|i|i.kind=="link").unwrap();assert_eq!(link.source,"Resources/Photography");assert!(Path::new(&link.thumbnail).is_file());
+        let link=lib.items.iter().find(|i|i.kind=="link").unwrap();assert_eq!(link.name,"=SUM(1,2) <script>");assert_eq!(link.source,"Resources/Photography");assert!(Path::new(&link.thumbnail).is_file());
         assert!(lib.items.iter().find(|i|i.name=="Missing reference").unwrap().missing);
         assert!(Path::new(&lib.root).starts_with(moved.canonicalize().unwrap()));
         let another=export(&path,&destination,"Design Backup",&AtomicBool::new(false),&mut |_|{}).unwrap();assert_ne!(another.path,result.path);
