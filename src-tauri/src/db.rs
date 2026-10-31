@@ -516,23 +516,42 @@ pub fn removed_items(path: &Path) -> Result<Vec<RemovedItem>> {
 #[derive(Serialize, Deserialize)]
 pub struct Backup {
     pub version: u32,
+    #[serde(default)]
+    pub portable: bool,
     pub library: Library,
 }
 pub fn export(path: &Path, destination: PathBuf) -> Result<()> {
     let data = Backup {
         version: 1,
+        portable: false,
         library: load(path, false)?,
     };
     std::fs::write(destination, serde_json::to_vec_pretty(&data).map_err(err)?).map_err(err)
 }
 pub fn import(path: &Path, source: PathBuf) -> Result<()> {
-    let backup: Backup =
-        serde_json::from_slice(&std::fs::read(source).map_err(err)?).map_err(err)?;
+    let mut backup: Backup =
+        serde_json::from_slice(&std::fs::read(&source).map_err(err)?).map_err(err)?;
     if backup.version != 1 {
         return Err("Unsupported backup version".into());
     }
+    if backup.portable {
+        let base=source.parent().ok_or("Missing backup folder")?.canonicalize().map_err(err)?;
+        for item in &mut backup.library.items {
+            if item.kind!="link" {item.path=crate::library_export::resolve_relative(&base,&item.path)?;}
+            if !item.thumbnail.is_empty() {item.thumbnail=crate::library_export::resolve_relative(&base,&item.thumbnail)?;}
+        }
+        backup.library.root=crate::library_export::resolve_relative(&base,&backup.library.root)?;
+        for (_,path) in &mut backup.library.source_paths {*path=crate::library_export::resolve_relative(&base,path)?;}
+    }
     let mut db = connect(path)?;
     let tx = db.transaction().map_err(err)?;
+    if backup.portable && setting(&tx,"root").is_none() {
+        for (name,path) in &backup.library.source_paths {
+            let key=match name.as_str() {"Design"=>"root","Photography"=>"root_photography","Videos"=>"root_videos",_=>continue};
+            set_setting(&tx,key,path)?;
+        }
+        set_setting(&tx,"source_layout","1")?;
+    }
     let mut projects = std::collections::HashMap::new();
     for category in backup.library.categories {
         tx.execute("INSERT OR IGNORE INTO categories(name) VALUES(?)",[valid_name(&category)?]).map_err(err)?;

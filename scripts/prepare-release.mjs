@@ -1,0 +1,13 @@
+import './check-version.mjs';
+import { readFileSync } from 'node:fs';
+import { mkdir, copyFile, readFile, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
+const version = JSON.parse(readFileSync('package.json', 'utf8')).version;
+await mkdir('.tools/release', { recursive: true });
+await copyFile('app/Design-Setup.exe', '.tools/release/Design-Setup.exe');
+const digest = createHash('sha256').update(await readFile('.tools/release/Design-Setup.exe')).digest('hex');
+const commit = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+await writeFile('.tools/release/SHA256SUMS.txt', `${digest}  Design-Setup.exe\n`);
+await writeFile('.tools/release/release-manifest.json', JSON.stringify({ version, commit, sha256: digest }, null, 2) + '\n');
+console.log(`Release v${version} prepared from ${commit}`);

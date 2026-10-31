@@ -938,6 +938,20 @@ main {
 .settings-modal {
   width: 445px;
 }
+.library-export { width: 490px; }
+.export-description { color: #62685b; line-height: 1.65; margin: 0 0 12px; }
+.library-export > small { display: block; line-height: 1.65; }
+.export-progress, .export-result { margin-top: 22px; padding: 16px; border: 1px solid #e0e4d8; border-radius: 7px; background: #f2f4ed; }
+.export-progress > div, .export-progress > div > span { display: flex; align-items: center; gap: 8px; }
+.export-progress > div { justify-content: space-between; }
+.export-progress strong { font-size: 12px; font-weight: 500; }
+.export-progress progress { width: 100%; height: 8px; margin: 14px 0 8px; accent-color: #647c55; }
+.export-current { min-height: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: #818977; margin: 8px 0 0; }
+.export-result p, .export-result details { line-height: 1.65; font-size: 12px; }
+.export-result code { display: block; overflow-wrap: anywhere; font-size: 11px; color: #727c64; }
+.export-result details { margin-top: 12px; }
+.export-result ul { max-height: 150px; overflow: auto; padding-left: 18px; }
+.library-export .form-error { white-space: pre-line; overflow-wrap: anywhere; }
 .settings-content {
   display: flex;
   flex-direction: column;

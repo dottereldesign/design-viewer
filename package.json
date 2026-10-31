@@ -1,7 +1,7 @@
 {
   "name": "design-viewer",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
@@ -19,7 +19,13 @@
     "test:drag": "node scripts/check-grid-return.mjs pointer-moves",
     "test:workflow": "node scripts/check-grid-return.mjs workflow-tools",
     "test:actions": "node scripts/check-grid-return.mjs copy-resources",
-    "test:native": "node scripts/desktop.mjs test"
+    "test:native": "node scripts/desktop.mjs test",
+    "check:version": "node scripts/check-version.mjs",
+    "version:bump": "node scripts/bump-version.mjs",
+    "scan:secrets": "node scripts/scan-secrets.mjs",
+    "release:prepare": "node scripts/prepare-release.mjs",
+    "release:tag": "node scripts/tag-release.mjs",
+    "test:export": "node scripts/check-grid-return.mjs library-export"
   },
   "dependencies": {
     "@tanstack/react-virtual": "^3.13.12",

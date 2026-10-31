@@ -1,0 +1,41 @@
+<!doctype html><html><head><meta charset="UTF-8"><title>Library export checks</title></head><body><div id="root"></div><pre id="check-result" hidden>pending</pre><script type="module">
+import React from 'react';import {createRoot} from 'react-dom/client';import App from '/src/App.tsx';import '/src/style.css';
+const library={items:[],projects:[],tags:[],sources:[],root:'C:/Design',scanning:false};
+const calls=[];let callback=0,active=null,picker='D:/Backups',failure=false;
+window.isTauri=true;window.__TAURI_INTERNALS__={transformCallback:()=>++callback,convertFileSrc:()=>'',invoke:async(command,args)=>{
+ calls.push({command,args});if(command==='get_library')return library;if(command.startsWith('plugin:event|'))return ++callback;
+ if(command==='app_version')return '0.2.0';if(command==='plugin:dialog|open')return picker;
+ if(command==='open_external_url'||command.startsWith('plugin:opener|'))return;
+ if(command==='export_library'){if(failure)throw Error('Not enough space on the backup drive');return new Promise(resolve=>{active={args,resolve};});}
+ if(command==='cancel_library_export'){active.resolve({path:'D:/Backups/partial',files:1,links:2,missing:[],cancelled:true});active=null;return;}
+ throw Error('Unexpected command '+command);
+}};window.__TAURI_EVENT_PLUGIN_INTERNALS__={unregisterListener(){}};
+createRoot(document.getElementById('root')).render(React.createElement(React.StrictMode,null,React.createElement(App)));
+const pause=ms=>new Promise(r=>setTimeout(r,ms)),assert=(ok,label)=>{if(!ok)throw Error(label);};
+async function until(test,label){const start=performance.now();while(!test()){if(performance.now()-start>5000)throw Error('Timed out: '+label);await pause(20);}}
+const button=text=>[...document.querySelectorAll('button')].find(b=>b.textContent.trim()===text);
+const checks=[];
+try {
+ await until(()=>button('Settings'),'Library');button('Settings').click();await until(()=>document.querySelector('.settings-modal'),'Settings');
+ await until(()=>document.querySelector('.settings-modal').textContent.includes('Design 0.2.0'),'Running version');
+ button('Get latest update').click();await until(()=>calls.some(c=>c.command==='open_external_url'),'Update link');assert(calls.find(c=>c.command==='open_external_url').args.url.endsWith('/releases/latest'),'Wrong update destination');
+ button('Export full library').click();await until(()=>document.querySelector('.library-export'),'Export panel');assert(!document.querySelector('.settings-modal'),'Settings stayed open');
+ assert(document.querySelector('main').inert,'Background not inert');
+ button('Choose backup folder').click();await until(()=>active,'Export started');assert(active.args.path==='D:/Backups','Wrong backup folder');
+ active.args.onProgress.onmessage({phase:'copying',copied_bytes:250000000,total_bytes:1000000000,completed_files:2,total_files:8,current:'A photograph.png'});
+ await until(()=>document.querySelector('progress')?.value===25,'Export progress');assert(document.querySelector('.export-current').textContent==='A photograph.png','Current filename missing');
+ document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));await pause(30);assert(document.querySelector('.library-export'),'Escape dismissed active export');
+ assert(document.querySelector('[aria-label="Close library export"]').disabled,'Active export can be closed');
+ active.resolve({path:'D:/Backups/Design Backup',files:8,links:4,missing:['One missing photo'],cancelled:false});active=null;
+ await until(()=>document.querySelector('.export-result')?.textContent.includes('Backup ready'),'Completion');assert(document.querySelector('.export-result').textContent.includes('1 unavailable files'),'Missing file summary absent');
+ button('Show backup folder').click();await until(()=>calls.some(c=>c.command.startsWith('plugin:opener|')),'Show folder');
+ checks.push('Settings shows running version and update link; full export chooses a folder, reports byte progress and missing files, and reveals the completed backup');
+ button('Export again').click();await until(()=>active,'Second export');button('Cancel export').click();await until(()=>document.querySelector('.export-result')?.textContent.includes('Export cancelled'),'Cancellation');
+ assert(document.querySelector('.export-result').textContent.includes('partial folder'),'Cancellation does not explain partial copy');
+ failure=true;button('Export again').click();await until(()=>document.querySelector('.library-export [role=alert]')?.textContent.includes('Not enough space'),'Disk failure');assert(!button('Choose backup folder').disabled,'Cannot retry after failure');
+ failure=false;picker=null;const count=calls.filter(c=>c.command==='export_library').length;button('Choose backup folder').click();await pause(100);assert(calls.filter(c=>c.command==='export_library').length===count,'Folder cancellation started export');
+ document.querySelector('[aria-label="Close library export"]').click();await until(()=>!document.querySelector('.library-export'),'Close export');assert(!document.querySelector('main').inert,'Background still inert');
+ checks.push('Active export cannot be dismissed accidentally; cancellation, disk errors, retries and folder-picker cancellation leave the library usable');
+ document.getElementById('check-result').textContent=JSON.stringify({ok:true,checks,width:innerWidth});
+}catch(error){document.getElementById('check-result').textContent=JSON.stringify({ok:false,error:String(error),checks,calls:calls.map(c=>c.command).slice(-12)});}
+</script></body></html>

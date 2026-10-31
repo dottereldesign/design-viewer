@@ -1,0 +1,10 @@
+import { readFileSync } from 'node:fs';
+const packageInfo = JSON.parse(readFileSync('package.json', 'utf8'));
+const lock = JSON.parse(readFileSync('package-lock.json', 'utf8'));
+const config = JSON.parse(readFileSync('src-tauri/tauri.conf.json', 'utf8'));
+const cargo = readFileSync('src-tauri/Cargo.toml', 'utf8').match(/^version = "([^"]+)"/m)?.[1];
+const cargoLock = readFileSync('src-tauri/Cargo.lock', 'utf8').match(/name = "design-viewer"\r?\nversion = "([^"]+)"/)?.[1];
+const versions = [packageInfo.version, lock.version, lock.packages[''].version, config.version, cargo, cargoLock];
+if (versions.some(version => version !== versions[0])) throw Error(`App versions do not match: ${versions.join(', ')}`);
+if (process.env.GITHUB_REF_TYPE === 'tag' && process.env.GITHUB_REF_NAME !== `v${versions[0]}`) throw Error('Release tag does not match app version');
+console.log(`All app versions match: ${versions[0]}`);
