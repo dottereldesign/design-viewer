@@ -105,8 +105,11 @@ kbd {
   font-weight: 600;
   padding-left: 9px;
 }
-.brand svg {
-  color: #596653;
+.brand-logo {
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+  flex-shrink: 0;
 }
 .nav-item {
   display: flex;
