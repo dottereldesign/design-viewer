@@ -10,7 +10,8 @@ struct Resource {
 }
 pub fn seed(db: &Connection) -> Result<()> {
     seed_batch(db, "resources_seeded", include_str!("../resources.json"))?;
-    seed_batch(db, "photography_resources_seeded", include_str!("../photography-resources.json"))
+    seed_batch(db, "photography_resources_seeded", include_str!("../photography-resources.json"))?;
+    seed_batch(db, "pattern_texture_resources_seeded", include_str!("../pattern-texture-resources.json"))
 }
 fn seed_batch(db: &Connection, key: &str, catalog: &str) -> Result<()> {
     if db::setting(db, key).is_some() {
