@@ -12,6 +12,7 @@ import { listen } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { openUrl } from "./api";
+import appLogo from "./assets/app-logo.png";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   ArrowDownUp,
@@ -805,7 +806,7 @@ export default function App() {
         inert={quickPreview !== null || (viewer !== null && !widePreview) || !!modal || !!capture || !!videoDialog || duplicatesOpen || removedOpen || libraryExportOpen}
       >
         <div className="brand">
-          <Grid2X2 size={18} strokeWidth={1.7} />
+          <img src={appLogo} alt="" className="brand-logo" />
           <span>Design</span>
         </div>
         <nav aria-label="Library">
