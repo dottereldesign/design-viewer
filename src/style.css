@@ -106,8 +106,8 @@ kbd {
   padding-left: 9px;
 }
 .brand-logo {
-  width: 28px;
-  height: 28px;
+  width: 48px;
+  height: 48px;
   object-fit: contain;
   flex-shrink: 0;
 }
