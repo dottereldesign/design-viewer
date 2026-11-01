@@ -179,7 +179,7 @@ fn resource_capture_seeding_move_restore_and_backup_preserve_destination() {
     let conn = db::connect(&path).unwrap();
     crate::resources::seed(&conn).unwrap();
     crate::resources::seed(&conn).unwrap();
-    assert_eq!(db::load(&path, false).unwrap().items.len(), 16);
+    assert_eq!(db::load(&path, false).unwrap().items.len(), 39);
     db::change(
         &path,
         change("create_project", vec![], None, Some("Inspiration"), None),
@@ -245,7 +245,7 @@ fn resource_capture_seeding_move_restore_and_backup_preserve_destination() {
         .iter()
         .any(|i| i.id == id));
     assert_eq!(content::capture(&path, input(true)).unwrap().ids, vec![id]);
-    assert_eq!(db::load(&path, false).unwrap().items.len(), 17);
+    assert_eq!(db::load(&path, false).unwrap().items.len(), 40);
     let fresh = temp.path().join("restart.sqlite");
     db::init(&fresh).unwrap();
     db::export(&path, temp.path().join("restart.json")).unwrap();
@@ -950,6 +950,7 @@ fn photography_resources_upgrade_existing_library_once_without_overwriting_saved
     let path = temp.path().join("resources.sqlite"); db::init(&path).unwrap();
     let conn = db::connect(&path).unwrap();
     db::set_setting(&conn,"resources_seeded","1").unwrap();
+    db::set_setting(&conn,"pattern_texture_resources_seeded","1").unwrap();
     conn.execute_batch("INSERT INTO items(path,name,kind,source,added,archived) VALUES
       ('https://unsplash.com/','My saved name','link','Resources/Custom',1,0),
       ('https://www.lensculture.com/','Removed resource','link','Resources/Photography',2,1),
@@ -1042,4 +1043,34 @@ fn organisation_history_failed_redo_keeps_both_stacks_atomic() {
     let after=db::load(&path,false).unwrap();
     assert_eq!(before.undo_count,after.undo_count);assert_eq!(before.redo_count,after.redo_count);assert_eq!(before.redo_label,after.redo_label);
     assert_eq!(after.projects.len(),1);
+}
+
+#[test]
+fn pattern_texture_resources_upgrade_once_and_preserve_user_changes() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("resources.sqlite");
+    db::init(&path).unwrap();
+    let conn = db::connect(&path).unwrap();
+    for key in ["resources_seeded", "photography_resources_seeded"] {
+        db::set_setting(&conn, key, "1").unwrap();
+    }
+    conn.execute_batch("INSERT INTO items(path,name,kind,source,added,archived) VALUES
+      ('https://heropatterns.com/','My patterns','link','Resources/Custom',1,0),
+      ('https://texturelabs.org/','Removed textures','link','Resources/Patterns & Textures',2,1),
+      ('https://pattern.monster/','Saved pattern','link','',3,0);").unwrap();
+    crate::resources::seed(&conn).unwrap();
+    crate::resources::seed(&conn).unwrap();
+    let loaded = db::load(&path, false).unwrap();
+    assert_eq!(loaded.items.len(), 22);
+    assert_eq!(loaded.items.iter().filter(|i| i.source == "Resources/Patterns & Textures").count(), 21);
+    let saved = loaded.items.iter().find(|i| i.path == "https://heropatterns.com/").unwrap();
+    assert_eq!(saved.name, "My patterns");
+    assert_eq!(saved.source, "Resources/Custom");
+    assert!(!loaded.items.iter().any(|i| i.path == "https://texturelabs.org/"));
+    let promoted = loaded.items.iter().find(|i| i.path == "https://pattern.monster/").unwrap();
+    assert_eq!(promoted.name, "Saved pattern");
+    assert_eq!(promoted.source, "Resources/Patterns & Textures");
+    db::change(&path, change("remove_items", vec![promoted.id], None, None, None)).unwrap();
+    crate::resources::seed(&conn).unwrap();
+    assert!(!db::load(&path, false).unwrap().items.iter().any(|i| i.id == promoted.id));
 }
