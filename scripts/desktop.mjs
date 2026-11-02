@@ -104,7 +104,8 @@ child.on("exit", async (code) => {
       const dirty = execFileSync("git", ["status", "--porcelain"], { encoding: "utf8", windowsHide: true }).trim().length > 0;
       writeFileSync("app/build.json", JSON.stringify({ version, commit, dirty, sha256, builtAt: new Date().toISOString() }, null, 2) + "\n");
       if (!process.argv.includes("--no-bundle") && !process.argv.includes("--debug")) {
-        const installer = join(env.CARGO_TARGET_DIR, "release", "bundle", "nsis", `Design_${version}_x64-setup.exe`);
+        const productName = JSON.parse(readFileSync("src-tauri/tauri.conf.json", "utf8")).productName;
+        const installer = join(env.CARGO_TARGET_DIR, "release", "bundle", "nsis", `${productName}_${version}_x64-setup.exe`);
         if (!existsSync(installer)) throw Error("Windows installer was not created");
         await copyFile(installer, "app/Design-Setup.exe");
       }

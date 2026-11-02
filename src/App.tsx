@@ -807,7 +807,7 @@ export default function App() {
       >
         <div className="brand">
           <img src={appLogo} alt="" className="brand-logo" />
-          <span>Design</span>
+          <span className="brand-name"><span>BitClever</span><span>Design Studio</span></span>
         </div>
         <nav aria-label="Library">
           <button

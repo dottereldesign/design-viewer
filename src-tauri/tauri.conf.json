@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Design",
+  "productName": "BitClever Design Studio",
   "version": "0.2.3",
   "identifier": "local.design.viewer",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Design",
+        "title": "BitClever Design Studio",
         "width": 1440,
         "height": 940,
         "minWidth": 850,
