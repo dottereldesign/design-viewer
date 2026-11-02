@@ -1,25 +1,23 @@
 # Solo workflow
 
-`main` → feature branch → pull request → checks → squash merge → version tag → Windows release.
+Default: edit -> check locally -> refresh local app -> commit and push a feature branch.
 
-One branch per change. Commit and push progress there. When the feature works and checks pass, merge it and delete the branch. No `develop` branch, approval queue or manual copying between branches.
+Local use and GitHub backup are the priority. A pushed branch backs up the work; CI and PR integration must not delay delivery of a working local change. Open a PR when useful, and merge only after required checks pass. Main remains protected. Do not bypass checks or force-push main.
 
-For app changes, bump the version once with `npm run version:bump -- patch` (or `minor`). After merging, run `npm run release:tag` on clean `main`. GitHub builds the installer and publishes it with a checksum and source-commit manifest. Existing releases stay available for rollback.
+Small cosmetic changes need proportionate verification, not the whole native and browser test suite. Do not bump versions, build installers or publish releases for routine tweaks. Publish only when the user explicitly requests it; batch accumulated changes into that release.
 
-`main` requires the two automated checks and a pull request, with zero required reviewer approvals. Agent instructions in `AGENTS.md` make pushing, merging and releasing part of completing a task.
+## See local changes
 
-## Avoid stale app builds
+- An existing development session hot reloads frontend edits, providing the fastest visual feedback.
+- For the normal desktop app, `npm run package -- --no-bundle` refreshes `app/Design.exe` and `app/build.json` without creating an installer. Native compilation can still take time.
+- Verify the build metadata's commit and executable checksum. Local builds may share the current release version; their commits distinguish them.
+- Close and reopen the app from the normal Windows shortcut to load a replaced executable. Do not silently launch a separate Codex-context app: redirected app-data folders can show a different library.
+- Documentation-only changes do not require rebuilding the app.
 
-- `npm run package` refreshes both the local executable and installer, and writes `app/build.json` with the version, Git commit and executable checksum.
-- Package, Rust and Tauri versions must match; CI rejects mismatches.
-- Settings shows the running app's version and links to the latest installer.
-- Close the old process and reopen the updated app to load a new executable. Replacing the file alone does not update a running process.
-- Prefer the existing normal Windows shortcut when reopening. Codex-launched processes can use redirected app-data folders and show a different library.
+## When a release is requested
+
+Integrate intended changes through passing PRs, bump matching package/Rust/Tauri versions once, run version and secret checks, and release from clean main with `npm run release:tag`. Wait for publication and verify the installer manifest and SHA-256. Use `npm run package` only when a full local installer is needed.
 
 ## Keep personal data out
 
-Media folders, SQLite databases, backups, `.env` files, installers and local tools are ignored. Gitleaks scans Git history and staged changes. GitHub secret scanning and push protection provide another check; none can guarantee detection of every possible secret.
-
-Export full libraries to a location outside the repo. Exported media and links are personal data and must never be committed.
-
-Based on [GitHub Flow](https://docs.github.com/en/get-started/using-github/github-flow), [protected branches](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches) and [GitHub secret protection](https://docs.github.com/en/code-security/getting-started/quickstart-for-securing-your-repository).
+Media, library databases, backups, credentials, installers and local tools stay out of Git. Run `npm run scan:secrets` after staging. Export personal libraries outside the repository. Use existing GitHub authentication; never commit tokens.
